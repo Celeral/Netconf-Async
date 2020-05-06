@@ -20,9 +20,9 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
+import java.util.LinkedList;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -167,14 +167,43 @@ public class NetConfSession extends NetconfSession {
     }
   }
 
+    static private class ProgressingQueue<T>
+    {
+        private boolean inProgress;
+        private LinkedList<T> queue = new LinkedList<>();
+
+        public synchronized T poll()
+        {
+            T t = queue.poll();
+            if (t == null) {
+                inProgress = false;
+            }
+
+            return t;
+        }
+
+        public synchronized boolean offer(T t)
+        {
+            if (inProgress) {
+                return queue.offer(t);
+            }
+
+            inProgress = true;
+            return false;
+        }
+
+        public synchronized boolean isInProgress()
+        {
+            return inProgress;
+        }
+    }
   /**
    * Since we send only one buffer at a time, we try to create less garbage by reusing the buffer as
    * much as possible.
    */
   private ByteBuffer requestBuffer = ByteBuffer.allocate(4096);
 
-  final ConcurrentLinkedQueue<RequestByteBuffferProcessor> writes = new ConcurrentLinkedQueue<>();
-  boolean writeInProgress;
+    final ProgressingQueue<RequestByteBuffferProcessor> writes = new ProgressingQueue<>();
 
   class RequestByteBuffferProcessor extends AbstractByteBufferProcessor<Void> {
     private final String string;
@@ -194,17 +223,11 @@ public class NetConfSession extends NetconfSession {
     public void completed() {
       future.complete(null);
 
-      RequestByteBuffferProcessor next;
-      synchronized (writes) {
-        next = writes.poll();
-        if (next == null) {
-          writeInProgress = false;
-          return;
-        }
+          RequestByteBuffferProcessor processor = writes.poll();
+          if (processor != null) {
+              scheduleWrite(processor);
+          }
       }
-
-      scheduleWrite(next);
-    }
   }
 
   private void scheduleWrite(RequestByteBuffferProcessor processor) {
@@ -247,17 +270,11 @@ public class NetConfSession extends NetconfSession {
       future.complete(charset.decode(decoded).toString());
       decoded.clear();
 
-      ResponseByteBufferProcessor processor;
-      synchronized (reads) {
-        processor = reads.poll();
-        if (processor == null) {
-          readInProgress = false;
-          return;
-        }
+          ResponseByteBufferProcessor processor = reads.poll();
+          if (processor != null) {
+              scheduleRead(processor);
+          }
       }
-
-      scheduleRead(processor);
-    }
   }
 
   private void scheduleRead(ResponseByteBufferProcessor processor) {
@@ -265,8 +282,7 @@ public class NetConfSession extends NetconfSession {
     processor.future.orTimeout(processor.timeout, processor.timeUnit);
   }
 
-  final ConcurrentLinkedQueue<ResponseByteBufferProcessor> reads = new ConcurrentLinkedQueue<>();
-  boolean readInProgress;
+    final ProgressingQueue<ResponseByteBufferProcessor> reads = new ProgressingQueue<>();
 
   public CompletableFuture<Void> request(String request, long timeout, TimeUnit timeUnit) {
     CompletableFuture<Void> future = new CompletableFuture<>();
@@ -275,16 +291,9 @@ public class NetConfSession extends NetconfSession {
       RequestByteBuffferProcessor processor =
           new RequestByteBuffferProcessor(request, future, timeout, timeUnit);
 
-      synchronized (writes) {
-        if (writeInProgress) {
-          writes.add(processor);
-          return future;
-        }
-
-        writeInProgress = true;
+      if (!writes.offer(processor)) {
+        scheduleWrite(processor);
       }
-
-      scheduleWrite(processor);
     } catch (Throwable th) {
       future.completeExceptionally(th);
     }
@@ -299,17 +308,11 @@ public class NetConfSession extends NetconfSession {
       ResponseByteBufferProcessor processor =
           new ResponseByteBufferProcessor(future, timeout, timeUnit);
 
-      synchronized (reads) {
-        if (readInProgress) {
-          reads.add(processor);
-          return future;
+        if (!reads.offer(processor)) {
+            scheduleRead(processor);
         }
-
-        readInProgress = true;
-      }
-
-      scheduleRead(processor);
-    } catch (Throwable th) {
+    }
+    catch (Throwable th) {
       future.completeExceptionally(th);
     }
 
