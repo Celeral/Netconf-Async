@@ -67,6 +67,7 @@ public class NetConfSession extends NetconfSession {
             session);
       } else {
         synchronized (initialized) {
+          initialized.set(true);
           this.session = session;
           initialized.notifyAll();
         }
@@ -167,43 +168,39 @@ public class NetConfSession extends NetconfSession {
     }
   }
 
-    static private class ProgressingQueue<T>
-    {
-        private boolean inProgress;
-        private LinkedList<T> queue = new LinkedList<>();
+  private static class ProgressingQueue<T> {
+    private boolean inProgress;
+    private LinkedList<T> queue = new LinkedList<>();
 
-        public synchronized T poll()
-        {
-            T t = queue.poll();
-            if (t == null) {
-                inProgress = false;
-            }
+    public synchronized T poll() {
+      T t = queue.poll();
+      if (t == null) {
+        inProgress = false;
+      }
 
-            return t;
-        }
-
-        public synchronized boolean offer(T t)
-        {
-            if (inProgress) {
-                return queue.offer(t);
-            }
-
-            inProgress = true;
-            return false;
-        }
-
-        public synchronized boolean isInProgress()
-        {
-            return inProgress;
-        }
+      return t;
     }
+
+    public synchronized boolean offer(T t) {
+      if (inProgress) {
+        return queue.offer(t);
+      }
+
+      inProgress = true;
+      return false;
+    }
+
+    public synchronized boolean isInProgress() {
+      return inProgress;
+    }
+  }
   /**
    * Since we send only one buffer at a time, we try to create less garbage by reusing the buffer as
    * much as possible.
    */
   private ByteBuffer requestBuffer = ByteBuffer.allocate(4096);
 
-    final ProgressingQueue<RequestByteBuffferProcessor> writes = new ProgressingQueue<>();
+  final ProgressingQueue<RequestByteBuffferProcessor> writes = new ProgressingQueue<>();
 
   class RequestByteBuffferProcessor extends AbstractByteBufferProcessor<Void> {
     private final String string;
@@ -223,11 +220,11 @@ public class NetConfSession extends NetconfSession {
     public void completed() {
       future.complete(null);
 
-          RequestByteBuffferProcessor processor = writes.poll();
-          if (processor != null) {
-              scheduleWrite(processor);
-          }
+      RequestByteBuffferProcessor processor = writes.poll();
+      if (processor != null) {
+        scheduleWrite(processor);
       }
+    }
   }
 
   private void scheduleWrite(RequestByteBuffferProcessor processor) {
@@ -270,11 +267,11 @@ public class NetConfSession extends NetconfSession {
       future.complete(charset.decode(decoded).toString());
       decoded.clear();
 
-          ResponseByteBufferProcessor processor = reads.poll();
-          if (processor != null) {
-              scheduleRead(processor);
-          }
+      ResponseByteBufferProcessor processor = reads.poll();
+      if (processor != null) {
+        scheduleRead(processor);
       }
+    }
   }
 
   private void scheduleRead(ResponseByteBufferProcessor processor) {
@@ -282,7 +279,7 @@ public class NetConfSession extends NetconfSession {
     processor.future.orTimeout(processor.timeout, processor.timeUnit);
   }
 
-    final ProgressingQueue<ResponseByteBufferProcessor> reads = new ProgressingQueue<>();
+  final ProgressingQueue<ResponseByteBufferProcessor> reads = new ProgressingQueue<>();
 
   public CompletableFuture<Void> request(String request, long timeout, TimeUnit timeUnit) {
     CompletableFuture<Void> future = new CompletableFuture<>();
@@ -308,36 +305,49 @@ public class NetConfSession extends NetconfSession {
       ResponseByteBufferProcessor processor =
           new ResponseByteBufferProcessor(future, timeout, timeUnit);
 
-        if (!reads.offer(processor)) {
-            scheduleRead(processor);
-        }
-    }
-    catch (Throwable th) {
+      if (!reads.offer(processor)) {
+        scheduleRead(processor);
+      }
+    } catch (Throwable th) {
       future.completeExceptionally(th);
     }
 
     return future;
   }
 
-  Element parseRPCReplyOk(String reply, int mid) {
-    try {
-      return super.recv_rpc_reply_ok(reply, Integer.toString(mid));
-    } catch (JNCException ex) {
-      throw new RuntimeException(ex);
-    }
+  public CompletableFuture<Element> readReply(long timeout, TimeUnit timeUnit) {
+    return response(timeout, timeUnit)
+        .thenApply(
+            reply -> {
+              try {
+                return parser.parse(reply);
+              } catch (JNCException ex) {
+                throw new RuntimeException(ex);
+              }
+            });
+  }
+
+  public CompletableFuture<Element> receiveNotification(long timeout, TimeUnit timeUnit) {
+    return response(timeout, timeUnit)
+        .thenApply(
+            reply -> {
+              try {
+                Element t = receive_notification_parse(reply);
+                return receive_notification_post_process(t);
+              } catch (JNCException ex) {
+                throw new RuntimeException(ex);
+              }
+            });
   }
 
   public CompletableFuture<Element> action(
-      Element data, long requestTimeout, long responseTimeout, TimeUnit timeUnit)
-      throws JNCException, IOException {
-    int mid = super.encode_action(out, data);
-    out.flush();
-    try {
-      return rpc(outputStream.toString(charset), requestTimeout, responseTimeout, timeUnit)
-          .thenApplyAsync(reply -> parseRPCReplyOk(reply, mid));
-    } finally {
-      outputStream.reset();
-    }
+      Element data, long requestTimeout, long responseTimeout, TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> action_request(data),
+        (reply, mid) -> recv_rpc_reply_ok(reply, Integer.toString(mid)),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
   }
 
   public CompletableFuture<AutoCloseable> hello(
@@ -369,52 +379,462 @@ public class NetConfSession extends NetconfSession {
     }
   }
 
-  public CompletableFuture<Element> close(
-      long requestTimeout, long responseTimeout, TimeUnit timeUnit) {
-    int mid = encode_closeSession(out);
-    out.flush();
-    try {
-      return rpc(outputStream.toString(charset), requestTimeout, responseTimeout, timeUnit)
-          .thenApplyAsync(reply -> parseRPCReplyOk(reply, mid));
-    } finally {
-      outputStream.reset();
-    }
+  @FunctionalInterface
+  static interface RequestFunction {
+    int get() throws Exception;
   }
 
-  public CompletableFuture<Element> kill(
-      long sessionId, long requestTimeout, long responseTimeout, TimeUnit timeUnit) {
-    int mid = encode_killSession(out, sessionId);
-    out.flush();
-    try {
-      return rpc(outputStream.toString(charset), requestTimeout, responseTimeout, timeUnit)
-          .thenApplyAsync(reply -> parseRPCReplyOk(reply, mid));
-    } finally {
-      outputStream.reset();
-    }
+  @FunctionalInterface
+  static interface ReplyFunction<T> {
+    T apply(String reply, int mid) throws Exception;
   }
 
-  public CompletableFuture<NodeSet> get(
-      String xpath, long requestTimeout, long responseTimeout, TimeUnit timeUnit) {
-    if (!capabilities.hasXPath()) {
-      return CompletableFuture.failedFuture(
-          new JNCException(
-              JNCException.SESSION_ERROR, "the :xpath capability is not supported by server"));
-    }
-    final int mid = encode_get(out, xpath);
-    out.flush();
+  private <T> CompletableFuture<T> rpc_request_reponse(
+      RequestFunction supplier,
+      ReplyFunction<T> function,
+      long requestTimeout,
+      long responseTimeout,
+      TimeUnit timeUnit) {
     try {
+      int mid = supplier.get();
       return rpc(outputStream.toString(charset), requestTimeout, responseTimeout, timeUnit)
           .thenApplyAsync(
               reply -> {
                 try {
-                  return parse_rpc_reply(parser, reply, Integer.toString(mid), "/data");
-                } catch (JNCException ex) {
-                  throw new RuntimeException(ex);
+                  return function.apply(reply, mid);
+                } catch (Exception ex) {
+                  throw new ResponseConsumptionException(ex);
                 }
               });
+    } catch (Exception ex) {
+      return CompletableFuture.failedFuture(new RequestGenerationException(ex));
     } finally {
       outputStream.reset();
     }
+  }
+
+  public CompletableFuture<Element> close(
+      long requestTimeout, long responseTimeout, TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> close_session_request(),
+        (reply, mid) -> recv_rpc_reply_ok(reply, Integer.toString(mid)),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
+  }
+
+  public CompletableFuture<Element> commit(
+      long requestTimeout, long responseTimeout, TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> commit_request(),
+        (reply, mid) -> recv_rpc_reply_ok(reply, Integer.toString(mid)),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
+  }
+
+  public CompletableFuture<Element> confirmedCommit(
+      int confirmationTimeoutInSeconds,
+      long requestTimeout,
+      long responseTimeout,
+      TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> confirmed_commit_request(confirmationTimeoutInSeconds),
+        (reply, mid) -> recv_rpc_reply_ok(reply, Integer.toString(mid)),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
+  }
+
+  public CompletableFuture<Element> copyConfig(
+      String sourceUrl, int target, long requestTimeout, long responseTimeout, TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> copy_config_request(sourceUrl, target),
+        (reply, mid) -> recv_rpc_reply_ok(reply, Integer.toString(mid)),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
+  }
+
+  public CompletableFuture<Element> copyConfig(
+      String sourceUrl,
+      String targetUrl,
+      long requestTimeout,
+      long responseTimeout,
+      TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> copy_config_request(sourceUrl, targetUrl),
+        (reply, mid) -> recv_rpc_reply_ok(reply, Integer.toString(mid)),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
+  }
+
+  public CompletableFuture<Element> copyConfig(
+      int source, String targetUrl, long requestTimeout, long responseTimeout, TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> copy_config_request(source, targetUrl),
+        (reply, mid) -> recv_rpc_reply_ok(reply, Integer.toString(mid)),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
+  }
+
+  public CompletableFuture<Element> copyConfig(
+      int source, int target, long requestTimeout, long responseTimeout, TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> copy_config_request(source, target),
+        (reply, mid) -> recv_rpc_reply_ok(reply, Integer.toString(mid)),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
+  }
+
+  public CompletableFuture<Element> copyConfig(
+      NodeSet sourceTrees,
+      String targetUrl,
+      long requestTimeout,
+      long responseTimeout,
+      TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> copy_config_request(sourceTrees, targetUrl),
+        (reply, mid) -> recv_rpc_reply_ok(reply, Integer.toString(mid)),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
+  }
+
+  public CompletableFuture<Element> copyConfig(
+      NodeSet sourceTrees,
+      int target,
+      long requestTimeout,
+      long responseTimeout,
+      TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> copy_config_request(sourceTrees, target),
+        (reply, mid) -> recv_rpc_reply_ok(reply, Integer.toString(mid)),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
+  }
+
+  public CompletableFuture<Element> copyConfig(
+      Element sourceTree,
+      int target,
+      long requestTimeout,
+      long responseTimeout,
+      TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> copy_config_request(new NodeSet(sourceTree), target),
+        (reply, mid) -> recv_rpc_reply_ok(reply, Integer.toString(mid)),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
+  }
+
+  public CompletableFuture<Element> copyConfig(
+      Element sourceTree,
+      String targetUrl,
+      long requestTimeout,
+      long responseTimeout,
+      TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> copy_config_request(new NodeSet(sourceTree), targetUrl),
+        (reply, mid) -> recv_rpc_reply_ok(reply, Integer.toString(mid)),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
+  }
+
+  public CompletableFuture<Element> kill(
+      long sessionId, long requestTimeout, long responseTimeout, TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> kill_session_request(sessionId),
+        (reply, mid) -> recv_rpc_reply_ok(reply, Integer.toString(mid)),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
+  }
+
+  public CompletableFuture<Element> createSubscription(
+      String streamName,
+      String eventFilter,
+      String startTime,
+      String stopTime,
+      long requestTimeout,
+      long responseTimeout,
+      TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> create_subscription_request(streamName, eventFilter, startTime, stopTime),
+        (reply, mid) -> recv_rpc_reply_ok(reply, Integer.toString(mid)),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
+  }
+
+  public CompletableFuture<Element> createSubscription(
+      String streamName,
+      NodeSet eventFilter,
+      String startTime,
+      String stopTime,
+      long requestTimeout,
+      long responseTimeout,
+      TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> create_subscription_request(streamName, eventFilter, startTime, stopTime),
+        (reply, mid) -> recv_rpc_reply_ok(reply, Integer.toString(mid)),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
+  }
+
+  public CompletableFuture<Element> createSubscription(
+      String streamName, long requestTimeout, long responseTimeout, TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> create_subscription_request(streamName, (String) null, null, null),
+        (reply, mid) -> recv_rpc_reply_ok(reply, Integer.toString(mid)),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
+  }
+
+  public CompletableFuture<Element> createSubscription(
+      long requestTimeout, long responseTimeout, TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> create_subscription_request(null, (String) null, null, null),
+        (reply, mid) -> recv_rpc_reply_ok(reply, Integer.toString(mid)),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
+  }
+
+  public CompletableFuture<Element> deleteConfig(
+      int dataStore, long requestTimeout, long responseTimeout, TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> delete_config_request(dataStore),
+        (reply, mid) -> recv_rpc_reply_ok(reply, Integer.toString(mid)),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
+  }
+
+  public CompletableFuture<Element> unlock(
+      int dataStore, long requestTimeout, long responseTimeout, TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> unlock_request(dataStore),
+        (reply, mid) -> recv_rpc_reply_ok(reply, Integer.toString(mid)),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
+  }
+
+  public CompletableFuture<Element> unlockPartial(
+      int lockId, long requestTimeout, long responseTimeout, TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> unlock_partial_request(lockId),
+        (reply, mid) -> recv_rpc_reply_ok(reply, Integer.toString(mid)),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
+  }
+
+  public CompletableFuture<Element> validate(
+      int datastore, long requestTimeout, long responseTimeout, TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> validate_request(datastore),
+        (reply, mid) -> recv_rpc_reply_ok(reply, Integer.toString(mid)),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
+  }
+
+  public CompletableFuture<Element> validate(
+      String url, long requestTimeout, long responseTimeout, TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> validate_request(url),
+        (reply, mid) -> recv_rpc_reply_ok(reply, Integer.toString(mid)),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
+  }
+
+  public CompletableFuture<Element> validate(
+      Element configTree, long requestTimeout, long responseTimeout, TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> validate_request(configTree),
+        (reply, mid) -> recv_rpc_reply_ok(reply, Integer.toString(mid)),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
+  }
+
+  public CompletableFuture<Element> deleteConfig(
+      String targetURL, long requestTimeout, long responseTimeout, TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> delete_config_request(targetURL),
+        (reply, mid) -> recv_rpc_reply_ok(reply, Integer.toString(mid)),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
+  }
+
+  public CompletableFuture<Element> discardChanges(
+      long requestTimeout, long responseTimeout, TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> discard_changes_request(),
+        (reply, mid) -> recv_rpc_reply_ok(reply, Integer.toString(mid)),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
+  }
+
+  public CompletableFuture<Element> editConfig(
+      int datastore,
+      Element configTree,
+      long requestTimeout,
+      long responseTimeout,
+      TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> edit_config_request(datastore, configTree),
+        (reply, mid) -> recv_rpc_reply_ok(reply, Integer.toString(mid)),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
+  }
+
+  public CompletableFuture<Element> editConfig(
+      int datastore,
+      NodeSet configTrees,
+      long requestTimeout,
+      long responseTimeout,
+      TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> edit_config_request(datastore, configTrees),
+        (reply, mid) -> recv_rpc_reply_ok(reply, Integer.toString(mid)),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
+  }
+
+  public CompletableFuture<Element> editConfig(
+      int datastore, String url, long requestTimeout, long responseTimeout, TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> edit_config_request(datastore, url),
+        (reply, mid) -> recv_rpc_reply_ok(reply, Integer.toString(mid)),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
+  }
+
+  public CompletableFuture<NodeSet> get(
+      String xpath, long requestTimeout, long responseTimeout, TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> get_request(xpath),
+        (reply, mid) -> parse_rpc_reply(parser, reply, Integer.toString(mid), "/data"),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
+  }
+
+  public CompletableFuture<NodeSet> get(
+      Element subtreeFilter, long requestTimeout, long responseTimeout, TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> get_request(subtreeFilter),
+        (reply, mid) -> parse_rpc_reply(parser, reply, Integer.toString(mid), "/data"),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
+  }
+
+  public CompletableFuture<NodeSet> getConfig(
+      int datastore, long requestTimeout, long responseTimeout, TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> get_config_request(datastore),
+        (reply, mid) -> parse_rpc_reply(parser, reply, Integer.toString(mid), "/data"),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
+  }
+
+  public CompletableFuture<NodeSet> getConfig(
+      long requestTimeout, long responseTimeout, TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> get_config_request(RUNNING),
+        (reply, mid) -> parse_rpc_reply(parser, reply, Integer.toString(mid), "/data"),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
+  }
+
+  public CompletableFuture<NodeSet> getConfig(
+      int datastore,
+      Element subtreeFilter,
+      long requestTimeout,
+      long responseTimeout,
+      TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> get_config_request(datastore, subtreeFilter),
+        (reply, mid) -> parse_rpc_reply(parser, reply, Integer.toString(mid), "/data"),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
+  }
+
+  public CompletableFuture<NodeSet> getConfig(
+      int datastore, String xpath, long requestTimeout, long responseTimeout, TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> get_config_request(datastore, xpath),
+        (reply, mid) -> parse_rpc_reply(parser, reply, Integer.toString(mid), "/data"),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
+  }
+
+  public CompletableFuture<NodeSet> getConfig(
+      String xpath, long requestTimeout, long responseTimeout, TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> get_config_request(RUNNING, xpath),
+        (reply, mid) -> parse_rpc_reply(parser, reply, Integer.toString(mid), "/data"),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
+  }
+
+  public CompletableFuture<NodeSet> getStreams(
+      long requestTimeout, long responseTimeout, TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> get_request(get_streams_filter()),
+        (reply, mid) -> parse_rpc_reply(parser, reply, Integer.toString(mid), "/data"),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
+  }
+
+  public CompletableFuture<Element> lock(
+      int dataStore, long requestTimeout, long responseTimeout, TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> lock_request(dataStore),
+        (reply, mid) -> recv_rpc_reply_ok(reply, Integer.toString(mid)),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
+  }
+
+  public CompletableFuture<Integer> lockPartial(
+      String[] select, long requestTimeout, long responseTimeout, TimeUnit timeUnit) {
+    return rpc_request_reponse(
+        () -> lock_partial_request(select),
+        (reply, mid) ->
+            lock_partial_post_process(
+                parse_rpc_reply(parser, reply, Integer.toString(mid), "/data")),
+        requestTimeout,
+        responseTimeout,
+        timeUnit);
+  }
+
+  public CompletableFuture<Integer> lockPartial(
+      String select, long requestTimeout, long responseTimeout, TimeUnit timeUnit) {
+    return lockPartial(new String[] {select}, requestTimeout, responseTimeout, timeUnit);
   }
 
   // make sure that there is a handoff from caller thread to the common forkpool immediately after

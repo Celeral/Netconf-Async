@@ -292,8 +292,7 @@ public class NetconfSession {
      * @param request XML encoded NETCONF request
      */
     public Element rpc(String request) throws IOException, JNCException {
-        out.print(request);
-        out.flush();
+        sendRequest(request);
         final String reply = in.readOne(timeout, timeUnit);
         return parser.parse(reply);
     }
@@ -312,9 +311,7 @@ public class NetconfSession {
      * @param request XML element tree
      */
     public Element rpc(Element request) throws IOException, JNCException {
-        // print, but no newline at the end
-        request.encode(out, false, capabilities);
-        out.flush();
+        sendRequest(request);
         final String reply = in.readOne(timeout, timeUnit);
         return parser.parse(reply);
     }
@@ -389,9 +386,7 @@ public class NetconfSession {
      * Gets the device configuration data.
      */
     public NodeSet getConfig(int datastore) throws JNCException, IOException {
-        trace("getConfig: " + datastoreToString(datastore));
-        final int mid = encode_getConfig(out, encode_datastore(datastore));
-        out.flush();
+        int mid = get_config_request(datastore);
         return recv_rpc_reply_data(mid);
     }
 
@@ -436,11 +431,8 @@ public class NetconfSession {
      */
     public NodeSet getConfig(int datastore, Element subtreeFilter)
             throws JNCException, IOException {
-        trace("getConfig: " + datastoreToString(datastore) + "\n"
-                + subtreeFilter.toXMLString());
-        final int mid = encode_getConfig(out, encode_datastore(datastore),
+        int mid = get_config_request(datastore,
                 subtreeFilter);
-        out.flush();
         return recv_rpc_reply_data(mid);
     }
 
@@ -453,15 +445,8 @@ public class NetconfSession {
      */
     public NodeSet getConfig(int datastore, String xpath)
             throws JNCException, IOException {
-        trace("getConfig: " + datastoreToString(datastore) + " \"" + xpath
-                + "\"");
-        if (!capabilities.xpathCapability) {
-            throw new JNCException(JNCException.SESSION_ERROR,
-                    "the :xpath capability is not supported by server");
-        }
-        final int mid = encode_getConfig(out, encode_datastore(datastore),
+        int mid = get_config_request(datastore,
                 xpath);
-        out.flush();
         return recv_rpc_reply_data(mid);
     }
 
@@ -482,9 +467,7 @@ public class NetconfSession {
      */
     public NodeSet get(Element subtreeFilter) throws JNCException,
             IOException {
-        trace("get: " + subtreeFilter.toXMLString());
-        final int mid = encode_get(out, subtreeFilter);
-        out.flush();
+        int mid = get_request(subtreeFilter);
         return recv_rpc_reply_data(mid);
     }
 
@@ -495,13 +478,7 @@ public class NetconfSession {
      * @param xpath An xpath epxression.
      */
     public NodeSet get(String xpath) throws JNCException, IOException {
-        trace("get: \"" + xpath + "\"");
-        if (!capabilities.hasXPath()) {
-            throw new JNCException(JNCException.SESSION_ERROR,
-                    "the :xpath capability is not supported by server");
-        }
-        final int mid = encode_get(out, xpath);
-        out.flush();
+        int mid = get_request(xpath);
         return recv_rpc_reply_data(mid);
     }
 
@@ -539,21 +516,15 @@ public class NetconfSession {
      */
     public void editConfig(int datastore, Element configTree)
             throws JNCException, IOException {
-        trace("editConfig: target=" + datastoreToString(datastore) + "\n"
-                + configTree.toXMLString());
-        final int mid = encode_editConfig(out, encode_datastore(datastore),
+        int mid = edit_config_request(datastore,
                 configTree);
-        out.flush();
         recv_rpc_reply_ok(mid);
     }
 
     public void editConfig(int datastore, NodeSet configTrees)
             throws JNCException, IOException {
-        trace("editConfig: target=" + datastoreToString(datastore) + "\n"
-                + configTrees.toXMLString());
-        final int mid = encode_editConfig(out, encode_datastore(datastore),
+        int mid = edit_config_request(datastore,
                 configTrees);
-        out.flush();
         recv_rpc_reply_ok(mid);
     }
 
@@ -567,11 +538,7 @@ public class NetconfSession {
      */
     public void editConfig(int datastore, String url) throws JNCException,
             IOException {
-        trace("editConfig: target=" + datastoreToString(datastore)
-                + " source=" + url);
-        final int mid = encode_editConfig(out, encode_datastore(datastore),
-                encode_url(url));
-        out.flush();
+            int mid = edit_config_request(datastore, url);
         recv_rpc_reply_ok(mid);
     }
 
@@ -763,10 +730,7 @@ public class NetconfSession {
     public void copyConfig(NodeSet sourceTrees, int target)
             throws JNCException, IOException {
 
-        trace("copyConfig: target=" + datastoreToString(target) + "\n"
-                + sourceTrees.toXMLString());
-        encode_copyConfig(out, sourceTrees, encode_datastore(target));
-        out.flush();
+        copy_config_request(sourceTrees, target);
         recv_rpc_reply_ok();
     }
 
@@ -784,11 +748,7 @@ public class NetconfSession {
 
     public void copyConfig(NodeSet sourceTrees, String targetUrl)
             throws JNCException, IOException {
-
-        trace("copyConfig: target=" + targetUrl + "\n"
-                + sourceTrees.toXMLString());
-        encode_copyConfig(out, sourceTrees, encode_url(targetUrl));
-        out.flush();
+        copy_config_request(sourceTrees, targetUrl);
         recv_rpc_reply_ok();
     }
 
@@ -802,11 +762,7 @@ public class NetconfSession {
      */
     public void copyConfig(int source, int target) throws JNCException,
             IOException {
-        trace("copyConfig: " + datastoreToString(source) + " "
-                + datastoreToString(target));
-        encode_copyConfig(out, encode_datastore(source),
-                encode_datastore(target));
-        out.flush();
+        copy_config_request(source, target);
         recv_rpc_reply_ok();
     }
 
@@ -819,11 +775,7 @@ public class NetconfSession {
      */
     public void copyConfig(int source, String targetUrl) throws JNCException,
             IOException {
-        trace("copyConfig: source=" + datastoreToString(source) + " target="
-                + targetUrl);
-        encode_copyConfig(out, encode_datastore(source),
-                encode_url(targetUrl));
-        out.flush();
+        copy_config_request(source, targetUrl);
         recv_rpc_reply_ok();
     }
 
@@ -837,9 +789,7 @@ public class NetconfSession {
      */
     public void copyConfig(String sourceUrl, String targetUrl)
             throws JNCException, IOException {
-        trace("copyConfig: source=" + sourceUrl + " target=" + targetUrl);
-        encode_copyConfig(out, encode_url(sourceUrl), encode_url(targetUrl));
-        out.flush();
+        copy_config_request(sourceUrl, targetUrl);
         recv_rpc_reply_ok();
     }
 
@@ -852,11 +802,7 @@ public class NetconfSession {
      */
     public void copyConfig(String sourceUrl, int target) throws JNCException,
             IOException {
-        trace("copyConfig: source=" + sourceUrl + " target="
-                + datastoreToString(target));
-        encode_copyConfig(out, encode_url(sourceUrl),
-                encode_datastore(target));
-        out.flush();
+        copy_config_request(sourceUrl, target);
         recv_rpc_reply_ok();
     }
 
@@ -867,9 +813,7 @@ public class NetconfSession {
      * @param datastore Datastore to be deleted
      */
     public void deleteConfig(int datastore) throws JNCException, IOException {
-        trace("deleteConfig: " + datastoreToString(datastore));
-        encode_deleteConfig(out, encode_datastore(datastore));
-        out.flush();
+        delete_config_request(datastore);
         recv_rpc_reply_ok();
     }
 
@@ -880,9 +824,7 @@ public class NetconfSession {
      */
     public void deleteConfig(String targetUrl) throws JNCException,
             IOException {
-        trace("deleteConfig: " + targetUrl);
-        encode_deleteConfig(out, encode_url(targetUrl));
-        out.flush();
+        delete_config_request(targetUrl);
         recv_rpc_reply_ok();
     }
 
@@ -899,9 +841,7 @@ public class NetconfSession {
      * @param datastore The datastore to lock
      */
     public void lock(int datastore) throws JNCException, IOException {
-        trace("lock: " + datastoreToString(datastore));
-        encode_lock(out, encode_datastore(datastore));
-        out.flush();
+        lock_request(datastore);
         recv_rpc_reply_ok();
     }
 
@@ -912,9 +852,7 @@ public class NetconfSession {
      * @param datastore The target datastore to unlock
      */
     public void unlock(int datastore) throws JNCException, IOException {
-        trace("unlock: " + datastoreToString(datastore));
-        encode_unlock(out, encode_datastore(datastore));
-        out.flush();
+        unlock_request(datastore);
         recv_rpc_reply_ok();
     }
 
@@ -952,26 +890,9 @@ public class NetconfSession {
      * @return A unique lock reference which should be used to unlockPartial()
      */
     public int lockPartial(String[] select) throws JNCException, IOException {
-        trace("lockPartial");
-        if (!capabilities.hasPartialLock()) {
-            throw new JNCException(JNCException.SESSION_ERROR,
-                    "capability :partial-lock is not supported by server");
-        }
-        // Allow simple paths to instance identifiers also
-        // if (!xpathCapability)
-        // throw new JNCException(JNCException.SESSION_ERROR,
-        // "capability :xpath is not supported by server");
-        final int mid = encode_lockPartial(out, select);
-        out.flush();
+        int mid = lock_partial_request(select);
         final NodeSet reply = recv_rpc_reply_lockPartial(mid);
-        try {
-            final Element t = reply.first().getFirst("self::lock-id");
-            return Integer.parseInt((String) t.value);
-        } catch (final Exception e) {
-            throw new JNCException(JNCException.SESSION_ERROR,
-                    "bad lock-id returned from partial-lock: "
-                            + reply.toXMLString());
-        }
+        return lock_partial_post_process(reply);
     }
 
     /**
@@ -992,17 +913,7 @@ public class NetconfSession {
      *            {@link #lockPartial(int,String[])}
      */
     public void unlockPartial(int lockId) throws JNCException, IOException {
-        trace("partialUnlock: " + lockId);
-        if (!capabilities.hasPartialLock()) {
-            throw new JNCException(JNCException.SESSION_ERROR,
-                    "capability :partial-lock is not supported by server");
-        }
-        if (!capabilities.hasXPath()) {
-            throw new JNCException(JNCException.SESSION_ERROR,
-                    "capability :xpath is not supported by server");
-        }
-        final int mid = encode_unlockPartial(out, lockId);
-        out.flush();
+        int mid = unlock_partial_request(lockId);
         recv_rpc_reply_ok(mid);
     }
 
@@ -1028,13 +939,7 @@ public class NetconfSession {
      * 
      */
     public void commit() throws JNCException, IOException {
-        trace("commit");
-        if (!capabilities.hasCandidate()) {
-            throw new JNCException(JNCException.SESSION_ERROR,
-                    "the :candidate capability is not supported by server");
-        }
-        final int mid = encode_commit(out);
-        out.flush();
+        int mid = commit_request();
         recv_rpc_reply_ok(mid);
     }
 
@@ -1075,17 +980,7 @@ public class NetconfSession {
      *            reverting config
      */
     public void confirmedCommit(int timeout) throws JNCException, IOException {
-        trace("confirmedCommit: " + timeout);
-        if (!capabilities.hasCandidate()) {
-            throw new JNCException(JNCException.SESSION_ERROR,
-                    "the :candidate capability is not supported by server");
-        }
-        if (!capabilities.hasConfirmedCommit()) {
-            throw new JNCException(JNCException.SESSION_ERROR,
-                    "the :confirmed-commit capability is not supported by server");
-        }
-        final int mid = encode_confirmedCommit(out, timeout);
-        out.flush();
+        int mid = confirmed_commit_request(timeout);
         recv_rpc_reply_ok(mid);
     }
 
@@ -1095,13 +990,7 @@ public class NetconfSession {
      * candidate configuration to the current running configuration.
      */
     public void discardChanges() throws JNCException, IOException {
-        trace("discardChanges");
-        if (!capabilities.hasCandidate()) {
-            throw new JNCException(JNCException.SESSION_ERROR,
-                    "the :candidate capability is not supported by server");
-        }
-        final int mid = encode_discardChanges(out);
-        out.flush();
+        int mid = discard_changes_request();
         recv_rpc_reply_ok(mid);
     }
 
@@ -1114,9 +1003,7 @@ public class NetconfSession {
      * associated connections.
      */
     public void closeSession() throws JNCException, IOException {
-        trace("closeSession");
-        final int mid = encode_closeSession(out);
-        out.flush();
+        int mid = close_session_request();
         recv_rpc_reply_ok(mid);
     }
 
@@ -1134,13 +1021,7 @@ public class NetconfSession {
      * @param sessionId The id of the session to terminate
      */
     public void killSession(long sessionId) throws JNCException, IOException {
-        trace("killSession: " + sessionId);
-        if (sessionId == this.sessionId) {
-            throw new JNCException(JNCException.SESSION_ERROR,
-                    "illegal to use kill-session on own session id");
-        }
-        final int mid = encode_killSession(out, sessionId);
-        out.flush();
+        int mid = kill_session_request(sessionId);
         recv_rpc_reply_ok(mid);
     }
 
@@ -1151,13 +1032,7 @@ public class NetconfSession {
      * @param configTree configuration tree to validate
      */
     public void validate(Element configTree) throws JNCException, IOException {
-        trace("validate: " + configTree.toXMLString());
-        if (!capabilities.hasValidate()) {
-            throw new JNCException(JNCException.SESSION_ERROR,
-                    "capability :validate is not supported by server");
-        }
-        final int mid = encode_validate(out, configTree);
-        out.flush();
+        int mid = validate_request(configTree);
         recv_rpc_reply_ok(mid);
     }
 
@@ -1168,13 +1043,7 @@ public class NetconfSession {
      * @param datastore The datastore to validate
      */
     public void validate(int datastore) throws IOException, JNCException {
-        trace("validate: " + datastoreToString(datastore));
-        if (!capabilities.hasValidate()) {
-            throw new JNCException(JNCException.SESSION_ERROR,
-                    "capability :validate is not supported by server");
-        }
-        final int mid = encode_validate(out, encode_datastore(datastore));
-        out.flush();
+        int mid = validate_request(datastore);
         recv_rpc_reply_ok(mid);
     }
 
@@ -1186,13 +1055,7 @@ public class NetconfSession {
      * @param url The source url to validate
      */
     public void validate(String url) throws IOException, JNCException {
-        trace("validate: " + url);
-        if (!capabilities.hasValidate()) {
-            throw new JNCException(JNCException.SESSION_ERROR,
-                    "capability :validate is not supported by server");
-        }
-        final int mid = encode_validate(out, encode_url(url));
-        out.flush();
+        int mid = validate_request(url);
         recv_rpc_reply_ok(mid);
     }
 
@@ -1266,16 +1129,8 @@ public class NetconfSession {
     public void createSubscription(String streamName, NodeSet eventFilter,
             String startTime, String stopTime) throws IOException,
             JNCException {
-        trace("createSubscription: stream=" + streamName + " filter="
-                + eventFilter.toXMLString() + " from=" + startTime + " to="
-                + stopTime);
-        if (!capabilities.hasNotification()) {
-            throw new JNCException(JNCException.SESSION_ERROR,
-                    "capability :notification is not supported by server");
-        }
-        final int mid = encode_createSubscription(out, streamName,
-                eventFilter, startTime, stopTime);
-        out.flush();
+        int mid = create_subscription_request(streamName, eventFilter,
+                startTime, stopTime);
         recv_rpc_reply_ok(mid);
     }
 
@@ -1294,19 +1149,8 @@ public class NetconfSession {
     public void createSubscription(String streamName, String eventFilter,
             String startTime, String stopTime) throws IOException,
             JNCException {
-        trace("createSubscription: stream=" + streamName + " filter="
-                + eventFilter + " from=" + startTime + " to=" + stopTime);
-        if (!capabilities.hasNotification()) {
-            throw new JNCException(JNCException.SESSION_ERROR,
-                    "capability :notification is not supported by server");
-        }
-        if (!capabilities.hasXPath()) {
-            throw new JNCException(JNCException.SESSION_ERROR,
-                    "capability :xpath is not supported by server");
-        }
-        final int mid = encode_createSubscription(out, streamName,
-                eventFilter, startTime, stopTime);
-        out.flush();
+        int mid = create_subscription_request(streamName, eventFilter,
+                startTime, stopTime);
         recv_rpc_reply_ok(mid);
     }
 
@@ -1322,9 +1166,7 @@ public class NetconfSession {
      * The available streams are returned.
      */
     public NodeSet getStreams() throws JNCException, IOException {
-        final Element filter = Element.create(
-                "urn:ietf:params:xml:ns:netmod:notification",
-                "netconf/streams");
+        Element filter = get_streams_filter();
         return get(filter);
     }
 
@@ -1337,17 +1179,8 @@ public class NetconfSession {
 
     public Element receiveNotification() throws IOException, JNCException {
         final String notification = in.readOne(timeout, timeUnit);
-        trace("notification= " + notification);
-        if (notification.length() == 0) {
-            throw new JNCException(JNCException.PARSER_ERROR, "empty input");
-        }
-        final Element t = parser.parse(notification);
-        final Element test = t.getFirst("self::notification");
-        if (test != null) {
-            return t;
-        }
-        /* rpc-error */
-        throw new JNCException(JNCException.NOTIFICATION_ERROR, t);
+        Element t = receive_notification_parse(notification);
+        return receive_notification_post_process(t);
     }
 
     /**
@@ -1358,9 +1191,7 @@ public class NetconfSession {
      * @param data element tree with action-data
      */
     public Element action(Element data) throws JNCException, IOException {
-        trace("action: " + data.toXMLString());
-        int mid = encode_action(out, data);
-        out.flush();
+        int mid = action_request(data);
         return recv_rpc_reply_ok(mid);
     }
 
@@ -2629,5 +2460,384 @@ public class NetconfSession {
         }
         /* rpc-error */
         throw new JNCException(JNCException.RPC_REPLY_ERROR, t);
+    }
+
+    protected int commit_request() throws JNCException
+    {
+        trace("commit");
+        if (!capabilities.hasCandidate()) {
+            throw new JNCException(JNCException.SESSION_ERROR,
+                    "the :candidate capability is not supported by server");
+        }
+        final int mid = encode_commit(out);
+        out.flush();
+        return mid;
+    }
+
+    protected int kill_session_request(long sessionId1) throws JNCException
+    {
+        trace("killSession: " + sessionId1);
+        if (sessionId1 == this.sessionId) {
+            throw new JNCException(JNCException.SESSION_ERROR,
+                    "illegal to use kill-session on own session id");
+        }
+        final int mid = encode_killSession(out, sessionId1);
+        out.flush();
+        return mid;
+    }
+
+    protected int close_session_request()
+    {
+        trace("closeSession");
+        final int mid = encode_closeSession(out);
+        out.flush();
+        return mid;
+    }
+
+    protected int action_request(Element data) throws JNCException
+    {
+        trace("action: " + data.toXMLString());
+        int mid = encode_action(out, data);
+        out.flush();
+        return mid;
+    }
+
+    protected int confirmed_commit_request(int timeoutSecs) throws JNCException
+    {
+        trace("confirmedCommit: " + timeoutSecs);
+        if (!capabilities.hasCandidate()) {
+            throw new JNCException(JNCException.SESSION_ERROR,
+                    "the :candidate capability is not supported by server");
+        }
+        if (!capabilities.hasConfirmedCommit()) {
+            throw new JNCException(JNCException.SESSION_ERROR,
+                    "the :confirmed-commit capability is not supported by server");
+        }
+        final int mid = encode_confirmedCommit(out, timeoutSecs);
+        out.flush();
+        return mid;
+    }
+
+    protected int copy_config_request(String sourceUrl, int target) throws JNCException
+    {
+        trace("copyConfig: source=" + sourceUrl + " target="
+              + datastoreToString(target));
+        int mid = encode_copyConfig(out, encode_url(sourceUrl),
+                               encode_datastore(target));
+        out.flush();
+        return mid;
+    }
+
+    protected int copy_config_request(String sourceUrl, String targetUrl) throws JNCException
+    {
+        trace("copyConfig: source=" + sourceUrl + " target=" + targetUrl);
+        int mid = encode_copyConfig(out, encode_url(sourceUrl), encode_url(targetUrl));
+        out.flush();
+        return mid;
+    }
+
+    protected int copy_config_request(int source, String targetUrl) throws JNCException
+    {
+        trace("copyConfig: source=" + datastoreToString(source) + " target="
+              + targetUrl);
+        int mid = encode_copyConfig(out, encode_datastore(source),
+                               encode_url(targetUrl));
+        out.flush();
+        return mid;
+    }
+
+    protected int copy_config_request(int source, int target) throws JNCException
+    {
+        trace("copyConfig: " + datastoreToString(source) + " "
+              + datastoreToString(target));
+        int mid = encode_copyConfig(out, encode_datastore(source),
+                               encode_datastore(target));
+        out.flush();
+        return mid;
+    }
+
+    protected int copy_config_request(NodeSet sourceTrees, String targetUrl) throws JNCException
+    {
+        trace("copyConfig: target=" + targetUrl + "\n"
+              + sourceTrees.toXMLString());
+        int mid = encode_copyConfig(out, sourceTrees, encode_url(targetUrl));
+        out.flush();
+        return mid;
+    }
+
+    protected int copy_config_request(NodeSet sourceTrees, int target) throws JNCException
+    {
+        trace("copyConfig: target=" + datastoreToString(target) + "\n"
+              + sourceTrees.toXMLString());
+        int mid = encode_copyConfig(out, sourceTrees, encode_datastore(target));
+        out.flush();
+        return mid;
+    }
+
+    protected int create_subscription_request(String streamName, String eventFilter, String startTime, String stopTime) throws JNCException
+    {
+        trace("createSubscription: stream=" + streamName + " filter="
+              + eventFilter + " from=" + startTime + " to=" + stopTime);
+        if (!capabilities.hasNotification()) {
+            throw new JNCException(JNCException.SESSION_ERROR,
+                    "capability :notification is not supported by server");
+        }
+        if (!capabilities.hasXPath()) {
+            throw new JNCException(JNCException.SESSION_ERROR,
+                    "capability :xpath is not supported by server");
+        }
+        final int mid = encode_createSubscription(out, streamName,
+                                                       eventFilter, startTime, stopTime);
+        out.flush();
+        return mid;
+    }
+
+    protected int create_subscription_request(String streamName, NodeSet eventFilter, String startTime, String stopTime) throws JNCException
+    {
+        trace("createSubscription: stream=" + streamName + " filter="
+              + eventFilter.toXMLString() + " from=" + startTime + " to="
+              + stopTime);
+        if (!capabilities.hasNotification()) {
+            throw new JNCException(JNCException.SESSION_ERROR,
+                    "capability :notification is not supported by server");
+        }
+        final int mid = encode_createSubscription(out, streamName,
+                                                       eventFilter, startTime, stopTime);
+        out.flush();
+        return mid;
+    }
+
+    protected int delete_config_request(int datastore) throws JNCException
+    {
+        trace("deleteConfig: " + datastoreToString(datastore));
+        int mid = encode_deleteConfig(out, encode_datastore(datastore));
+        out.flush();
+        return mid;
+    }
+
+    protected int delete_config_request(String targetUrl) throws JNCException
+    {
+        trace("deleteConfig: " + targetUrl);
+        int mid = encode_deleteConfig(out, encode_url(targetUrl));
+        out.flush();
+        return mid;
+    }
+
+    protected int discard_changes_request() throws JNCException
+    {
+        trace("discardChanges");
+        if (!capabilities.hasCandidate()) {
+            throw new JNCException(JNCException.SESSION_ERROR,
+                    "the :candidate capability is not supported by server");
+        }
+        final int mid = encode_discardChanges(out);
+        out.flush();
+        return mid;
+    }
+
+    protected int edit_config_request(int datastore, Element configTree) throws JNCException
+    {
+        trace("editConfig: target=" + datastoreToString(datastore) + "\n"
+              + configTree.toXMLString());
+        final int mid = encode_editConfig(out, encode_datastore(datastore),
+                                               configTree);
+        out.flush();
+        return mid;
+    }
+
+    protected int edit_config_request(int datastore, NodeSet configTrees) throws JNCException
+    {
+        trace("editConfig: target=" + datastoreToString(datastore) + "\n"
+              + configTrees.toXMLString());
+        final int mid = encode_editConfig(out, encode_datastore(datastore),
+                                               configTrees);
+        out.flush();
+        return mid;
+    }
+
+    protected int edit_config_request(int datastore, String url) throws JNCException
+    {
+        trace("editConfig: target=" + datastoreToString(datastore)
+              + " source=" + url);
+        final int mid = encode_editConfig(out, encode_datastore(datastore),
+                                               encode_url(url));
+        out.flush();
+        return mid;
+    }
+
+    protected int get_request(Element subtreeFilter) throws JNCException
+    {
+        trace("get: " + subtreeFilter.toXMLString());
+        final int mid = encode_get(out, subtreeFilter);
+        out.flush();
+        return mid;
+    }
+
+    protected int get_request(String xpath) throws JNCException
+    {
+        trace("get: \"" + xpath + "\"");
+        if (!capabilities.hasXPath()) {
+            throw new JNCException(JNCException.SESSION_ERROR,
+                    "the :xpath capability is not supported by server");
+        }
+        final int mid = encode_get(out, xpath);
+        out.flush();
+        return mid;
+    }
+
+    protected int get_config_request(int datastore) throws JNCException
+    {
+        trace("getConfig: " + datastoreToString(datastore));
+        final int mid = encode_getConfig(out, encode_datastore(datastore));
+        out.flush();
+        return mid;
+    }
+
+    protected int get_config_request(int datastore, Element subtreeFilter) throws JNCException
+    {
+        trace("getConfig: " + datastoreToString(datastore) + "\n"
+              + subtreeFilter.toXMLString());
+        final int mid = encode_getConfig(out, encode_datastore(datastore),
+                                              subtreeFilter);
+        out.flush();
+        return mid;
+    }
+
+    protected int get_config_request(int datastore, String xpath) throws JNCException
+    {
+        trace("getConfig: " + datastoreToString(datastore) + " \"" + xpath
+              + "\"");
+        if (!capabilities.xpathCapability) {
+            throw new JNCException(JNCException.SESSION_ERROR,
+                    "the :xpath capability is not supported by server");
+        }
+        final int mid = encode_getConfig(out, encode_datastore(datastore),
+                                              xpath);
+        out.flush();
+        return mid;
+    }
+
+    protected Element get_streams_filter() throws JNCException
+    {
+        final Element filter = Element.create(
+                "urn:ietf:params:xml:ns:netmod:notification",
+                "netconf/streams");
+        return filter;
+    }
+
+    protected int lock_request(int datastore) throws JNCException
+    {
+        trace("lock: " + datastoreToString(datastore));
+        int mid = encode_lock(out, encode_datastore(datastore));
+        out.flush();
+        return mid;
+    }
+
+    protected int lock_partial_request(String[] select) throws JNCException
+    {
+        trace("lockPartial");
+        if (!capabilities.hasPartialLock()) {
+            throw new JNCException(JNCException.SESSION_ERROR,
+                    "capability :partial-lock is not supported by server");
+        }
+        // Allow simple paths to instance identifiers also
+        // if (!xpathCapability)
+        // throw new JNCException(JNCException.SESSION_ERROR,
+        // "capability :xpath is not supported by server");
+        final int mid = encode_lockPartial(out, select);
+        out.flush();
+        return mid;
+    }
+
+    protected int lock_partial_post_process(final NodeSet reply) throws JNCException
+    {
+        try {
+            final Element t = reply.first().getFirst("self::lock-id");
+            return Integer.parseInt((String) t.value);
+        } catch (final Exception e) {
+            throw new JNCException(JNCException.SESSION_ERROR,
+                    "bad lock-id returned from partial-lock: "
+                    + reply.toXMLString());
+        }
+    }
+
+    protected Element receive_notification_post_process(final Element t) throws JNCException
+    {
+        final Element test = t.getFirst("self::notification");
+        if (test != null) {
+            return t;
+        }
+        /* rpc-error */
+        throw new JNCException(JNCException.NOTIFICATION_ERROR, t);
+    }
+
+    protected Element receive_notification_parse(final String notification) throws JNCException
+    {
+        trace("notification= " + notification);
+        if (notification.length() == 0) {
+            throw new JNCException(JNCException.PARSER_ERROR, "empty input");
+        }
+        final Element t = parser.parse(notification);
+        return t;
+    }
+
+    protected int unlock_request(int datastore) throws JNCException
+    {
+        trace("unlock: " + datastoreToString(datastore));
+        int mid = encode_unlock(out, encode_datastore(datastore));
+        out.flush();
+        return mid;
+    }
+
+    protected int unlock_partial_request(int lockId) throws JNCException
+    {
+        trace("partialUnlock: " + lockId);
+        if (!capabilities.hasPartialLock()) {
+            throw new JNCException(JNCException.SESSION_ERROR,
+                    "capability :partial-lock is not supported by server");
+        }
+        if (!capabilities.hasXPath()) {
+            throw new JNCException(JNCException.SESSION_ERROR,
+                    "capability :xpath is not supported by server");
+        }
+        final int mid = encode_unlockPartial(out, lockId);
+        out.flush();
+        return mid;
+    }
+
+    protected int validate_request(Element configTree) throws JNCException
+    {
+        trace("validate: " + configTree.toXMLString());
+        if (!capabilities.hasValidate()) {
+            throw new JNCException(JNCException.SESSION_ERROR,
+                    "capability :validate is not supported by server");
+        }
+        final int mid = encode_validate(out, configTree);
+        out.flush();
+        return mid;
+    }
+
+    protected int validate_request(int datastore) throws JNCException
+    {
+        trace("validate: " + datastoreToString(datastore));
+        if (!capabilities.hasValidate()) {
+            throw new JNCException(JNCException.SESSION_ERROR,
+                    "capability :validate is not supported by server");
+        }
+        final int mid = encode_validate(out, encode_datastore(datastore));
+        out.flush();
+        return mid;
+    }
+
+    protected int validate_request(String url) throws JNCException
+    {
+        trace("validate: " + url);
+        if (!capabilities.hasValidate()) {
+            throw new JNCException(JNCException.SESSION_ERROR,
+                    "capability :validate is not supported by server");
+        }
+        final int mid = encode_validate(out, encode_url(url));
+        out.flush();
+        return mid;
     }
 }
