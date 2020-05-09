@@ -55,11 +55,11 @@ To use the package, you need to use following Maven dependency:
 </dependencies>
 ```
 
-or download jars from [Central Maven repository](http://repo1.maven.org/maven2/com/celeral/netconf-async/).
+or download jars from [Central Maven repository](https://repo1.maven.org/maven2/com/celeral/netconf-async/).
 
 ### Non-Maven
 
-For non-Maven use cases, you download jars from [Central Maven repository](http://repo1.maven.org/maven2/com/celeral/netconf-async/).
+For non-Maven use cases, you download jars from [Central Maven repository](https://repo1.maven.org/maven2/com/celeral/netconf-async/).
 
 ## Java Code Example
 

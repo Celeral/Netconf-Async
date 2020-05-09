@@ -1,13 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
+
   <parent>
-    <groupId>com.celeral.netconf</groupId>
-    <artifactId>celeral-netconf</artifactId>
-    <version>1.0.0-SNAPSHOT</version>
+    <groupId>com.celeral</groupId>
+    <artifactId>netconf</artifactId>
+    <version>1.0.0</version>
   </parent>
+
+  <name>Async NetConf with NetConf-1.1 Protocol</name>
   <artifactId>netconf-async</artifactId>
   <packaging>jar</packaging>
+
   <properties>
     <log4j2.version>2.13.0</log4j2.version>
     <sshd.version>2.3.0</sshd.version>
@@ -151,7 +155,7 @@
     <dependency>
       <groupId>com.tailf</groupId>
       <artifactId>jnc</artifactId>
-      <version>1.0</version>
+      <version>2.0.0</version>
     </dependency>
   </dependencies>
 </project>
