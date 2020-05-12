@@ -21,12 +21,16 @@ import java.io.PrintStream;
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
 import java.util.LinkedList;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Function;
 
 import com.tailf.jnc.Capabilities;
 import com.tailf.jnc.Element;
@@ -44,7 +48,23 @@ import com.celeral.utils.Throwables;
 public class NetConfSession extends NetconfSession {
   public static final String NETCONF_BASE_1_1_CAPABILITY =
       Capabilities.URN_IETF_PARAMS_NETCONF + "base:1.1";
+
+  private final ByteBufferChannel channel;
   private final Charset charset;
+  private final ExecutorService executorService;
+
+  final ProgressingQueue<Schedulable> reads;
+  final ProgressingQueue<Schedulable> writes;
+
+  /**
+   * Since we send only one buffer at a time, we try to create less garbage by reusing the buffer as
+   * much as possible.
+   */
+  private ByteBuffer requestBuffer;
+
+  private ByteBuffer responseBuffer;
+
+  private final ByteArrayOutputStream outputStream;
   private MessageCodec<ByteBuffer> codec;
 
   /**
@@ -129,13 +149,14 @@ public class NetConfSession extends NetconfSession {
     }
   }
 
-  private final ByteArrayOutputStream outputStream;
-  private ByteBufferChannel channel;
-
   public NetConfSession(ByteBufferChannel channel, Charset charset)
       throws JNCException, IOException {
-    this(new ByteArrayOutputStream(4096), charset);
-    this.channel = channel;
+    this(channel, charset, ForkJoinPool.commonPool());
+  }
+
+  public NetConfSession(ByteBufferChannel channel, Charset charset, ExecutorService executorService)
+      throws JNCException, IOException {
+    this(new ByteArrayOutputStream(4096), channel, charset, executorService);
     initializeTransport();
   }
 
@@ -143,12 +164,29 @@ public class NetConfSession extends NetconfSession {
     ((NetConfTransport) super.in).setNetConfSession(this);
   }
 
-  private NetConfSession(ByteArrayOutputStream stream, Charset charset)
+  private NetConfSession(
+      ByteArrayOutputStream stream,
+      ByteBufferChannel channel,
+      Charset charset,
+      ExecutorService executorService)
       throws JNCException, IOException {
     super(new NetConfTransport(), new PrintStream(stream, false, charset));
-    this.outputStream = stream;
+    this.executorService =
+        Objects.requireNonNull(executorService, "executorService argument must be non-null!");
     this.charset = charset;
+    this.channel = channel;
+    this.outputStream = stream;
+
     this.codec = new DefaultMessageCodec(charset);
+
+    this.reads = new ProgressingQueue<>();
+    this.responseBuffer = ByteBuffer.allocate(4096);
+    this.writes = new ProgressingQueue<>();
+    this.requestBuffer = ByteBuffer.allocate(4096);
+  }
+
+  private interface Schedulable {
+    void schedule();
   }
 
   abstract static class AbstractByteBufferProcessor<T> implements ByteBufferProcessor {
@@ -194,15 +232,9 @@ public class NetConfSession extends NetconfSession {
       return inProgress;
     }
   }
-  /**
-   * Since we send only one buffer at a time, we try to create less garbage by reusing the buffer as
-   * much as possible.
-   */
-  private ByteBuffer requestBuffer = ByteBuffer.allocate(4096);
 
-  final ProgressingQueue<RequestByteBuffferProcessor> writes = new ProgressingQueue<>();
-
-  class RequestByteBuffferProcessor extends AbstractByteBufferProcessor<Void> {
+  class RequestByteBuffferProcessor extends AbstractByteBufferProcessor<Void>
+      implements Schedulable {
     private final String string;
 
     RequestByteBuffferProcessor(
@@ -220,42 +252,43 @@ public class NetConfSession extends NetconfSession {
     public void completed() {
       future.complete(null);
 
-      RequestByteBuffferProcessor processor = writes.poll();
+      Schedulable processor = writes.poll();
       if (processor != null) {
-        scheduleWrite(processor);
+        processor.schedule();
       }
     }
-  }
 
-  private void scheduleWrite(RequestByteBuffferProcessor processor) {
-    byte[] bytes = processor.string.getBytes(charset);
-    if (requestBuffer.capacity() >= bytes.length) {
-      requestBuffer.clear();
-      requestBuffer.put(bytes);
-      requestBuffer.flip();
-    } else {
-      requestBuffer = ByteBuffer.wrap(bytes);
+    @Override
+    public void schedule() {
+      byte[] bytes = string.getBytes(charset);
+      if (requestBuffer.capacity() >= bytes.length) {
+        requestBuffer.clear();
+        requestBuffer.put(bytes);
+        requestBuffer.flip();
+      } else {
+        requestBuffer = ByteBuffer.wrap(bytes);
+      }
+
+      channel.write(this);
+      future.orTimeout(timeout, timeUnit);
     }
-
-    channel.write(processor);
-    processor.future.orTimeout(processor.timeout, processor.timeUnit);
   }
 
-  private ByteBuffer decoded = ByteBuffer.allocate(4096);
-
-  class ResponseByteBufferProcessor extends AbstractByteBufferProcessor<String> {
+  class ResponseByteBufferProcessor extends AbstractByteBufferProcessor<String>
+      implements Schedulable {
     ResponseByteBufferProcessor(CompletableFuture<String> future, long timeout, TimeUnit timeUnit) {
       super(future, timeout, timeUnit);
     }
 
     @Override
     public boolean process(ByteBuffer buffer) {
-      if (codec.decode(buffer, decoded)) {
+      if (codec.decode(buffer, responseBuffer)) {
         return false;
       }
 
-      if (!decoded.hasRemaining()) {
-        decoded = ByteBuffer.allocate(decoded.capacity() << 1).put(decoded.flip());
+      if (!responseBuffer.hasRemaining()) {
+        responseBuffer =
+            ByteBuffer.allocate(responseBuffer.capacity() << 1).put(responseBuffer.flip());
       }
 
       return true;
@@ -263,56 +296,77 @@ public class NetConfSession extends NetconfSession {
 
     @Override
     public void completed() {
-      decoded.flip();
-      future.complete(charset.decode(decoded).toString());
-      decoded.clear();
+      responseBuffer.flip();
+      future.complete(charset.decode(responseBuffer).toString());
+      responseBuffer.clear();
 
-      ResponseByteBufferProcessor processor = reads.poll();
+      Schedulable processor = reads.poll();
       if (processor != null) {
-        scheduleRead(processor);
+        processor.schedule();
       }
+    }
+
+    @Override
+    public void schedule() {
+      channel.read(this);
+      future.orTimeout(timeout, timeUnit);
     }
   }
 
-  private void scheduleRead(ResponseByteBufferProcessor processor) {
-    channel.read(processor);
-    processor.future.orTimeout(processor.timeout, processor.timeUnit);
+  static <T> CompletableFuture<T> enqueueOrSchedule(
+      Function<CompletableFuture<T>, Schedulable> function, ProgressingQueue<Schedulable> queue) {
+    CompletableFuture<T> future = new CompletableFuture<>();
+
+    try {
+      Schedulable schedulable = function.apply(future);
+      if (!queue.offer(schedulable)) {
+        schedulable.schedule();
+      }
+    } catch (Throwable th) {
+      future.completeExceptionally(th);
+    }
+
+    return future;
   }
 
-  final ProgressingQueue<ResponseByteBufferProcessor> reads = new ProgressingQueue<>();
-
+  /**
+   * Send the request to the netconf server.
+   *
+   * <p>request method support one of the two fundamental building phases of the RPC operation with
+   * the server. The other phase being the response phase. Any failure during the request phase is
+   * communicated to the caller as the RequestPhaseException. RequestTimeoutException is a subclass
+   * of the RequestPhaseException and when raised signifies failure to successfully complete the
+   * request phase within the given timeout period.
+   *
+   * @param request the request payload to send to the server
+   * @param timeout the timeout for the request operation to be finished
+   * @param timeUnit the unit for the timeout value
+   * @return the future which communicates success or the RequestPhaseException upon failure
+   */
   public CompletableFuture<Void> request(String request, long timeout, TimeUnit timeUnit) {
-    CompletableFuture<Void> future = new CompletableFuture<>();
-
-    try {
-      RequestByteBuffferProcessor processor =
-          new RequestByteBuffferProcessor(request, future, timeout, timeUnit);
-
-      if (!writes.offer(processor)) {
-        scheduleWrite(processor);
-      }
-    } catch (Throwable th) {
-      future.completeExceptionally(th);
-    }
-
-    return future;
+    return NetConfSession.enqueueOrSchedule(
+        future -> new RequestByteBuffferProcessor(request, future, timeout, timeUnit), writes);
   }
 
+  /**
+   * Receive a response from the netconf server.
+   *
+   * <p>response method implements one of the two fundamental building phases of the RPC operation
+   * with the server. The other phase being the request phase. Any failure during the response phase
+   * is communicated to the caller as the ResponsePhaseException. ResponseTimeoutException is a
+   * subclass of the ResponsePhaseException and when raised signifies failure to successfully
+   * complete the response phase within the given timeout period. The response timeout period is
+   * cumulative of the time it takes the server to prepare the response and the time it takes for
+   * the client to receive after server transmits it.
+   *
+   * @param timeout the timeout for the response operation to be finished
+   * @param timeUnit the unit for the timeout value
+   * @return the future which communicates success with the response string or the
+   *     ResponsePhaseException upon failure
+   */
   public CompletableFuture<String> response(long timeout, TimeUnit timeUnit) {
-    CompletableFuture<String> future = new CompletableFuture<>();
-
-    try {
-      ResponseByteBufferProcessor processor =
-          new ResponseByteBufferProcessor(future, timeout, timeUnit);
-
-      if (!reads.offer(processor)) {
-        scheduleRead(processor);
-      }
-    } catch (Throwable th) {
-      future.completeExceptionally(th);
-    }
-
-    return future;
+    return NetConfSession.enqueueOrSchedule(
+        future -> new ResponseByteBufferProcessor(future, timeout, timeUnit), reads);
   }
 
   public CompletableFuture<Element> readReply(long timeout, TimeUnit timeUnit) {
@@ -373,7 +427,8 @@ public class NetConfSession extends NetconfSession {
                 }
 
                 return closeSession;
-              });
+              },
+              executorService);
     } finally {
       outputStream.reset();
     }
@@ -405,7 +460,8 @@ public class NetConfSession extends NetconfSession {
                 } catch (Exception ex) {
                   throw new ResponseConsumptionException(ex);
                 }
-              });
+              },
+              executorService);
     } catch (Exception ex) {
       return CompletableFuture.failedFuture(new RequestGenerationException(ex));
     } finally {
@@ -837,9 +893,34 @@ public class NetConfSession extends NetconfSession {
     return lockPartial(new String[] {select}, requestTimeout, responseTimeout, timeUnit);
   }
 
-  // make sure that there is a handoff from caller thread to the common forkpool immediately after
-  // rpc is called
-  // and right before the return is called.
+  /**
+   * Make a netconf RPC call using the request and the return the future which completes when the
+   * response is ready.
+   *
+   * <p>This call is the foundational implementation for all the netconf RPC messages
+   * implementation. Except for submitting the job to the underlying executor service, that is
+   * executed in the caller's thread, all the operations are executed by the executor service. The
+   * only exception to this could be the IO that's executed by the implementations of the
+   * ByteBufferChannel and ByteBufferProcessor.
+   *
+   * <p>Note that care has been taken to ensure that the return completable is either successful or
+   * fails with either the RequestPhaseException or ResponsePhaseException. Failure with
+   * RequestPhaseException signifies that the request was not transmitted in its entirety to the
+   * server. Whereas failure with ResponsePhaseException signifies that the server most likely saw
+   * the request and the error happened while we were either waiting for a response, or receiving a
+   * response, or parsing the response received. Appropriate root cause may be deduced by looking at
+   * the root cause of the thrown exception. RequestTimeoutExceptions and ResponseTimeoutExceptions
+   * are subclasses of RequestPhaseException and ResponsePhaseException respectively and signify the
+   * respective operations could not be validated to have finished within the timeout values passed
+   * to the method.
+   *
+   * @param request the netconf request to be sent as is to the netconf server
+   * @param requestTimeout timeout value to be used in conjunction with timeUnit to send the request
+   * @param responseTimeout timeout value to be used in conjunction with timeUnit to wait for the
+   *     response
+   * @param timeUnit timeunit to be used for requestTimeout and responseTimeout
+   * @return Future which holds the response from the netconf server or failure reason
+   */
   public CompletableFuture<String> rpc(
       String request, long requestTimeout, long responseTimeout, TimeUnit timeUnit) {
     return CompletableFuture.supplyAsync(
@@ -861,7 +942,8 @@ public class NetConfSession extends NetconfSession {
                           }
 
                           throw new RequestPhaseException(ex);
-                        })
+                        },
+                        executorService)
                     .thenComposeAsync(
                         voids ->
                             response(responseTimeout, timeUnit)
@@ -881,7 +963,9 @@ public class NetConfSession extends NetconfSession {
                                       }
 
                                       throw new ResponsePhaseException(ex);
-                                    })))
+                                    }),
+                        executorService),
+            executorService)
         .thenApply(cfs -> cfs.join());
   }
 
