@@ -1,23 +1,17 @@
 package com.tailf.jnc;
 
-import java.io.IOException;
-import java.util.concurrent.TimeUnit;
-
 /**
  * A NETCONF transport interface. This interface can be used to write custom
  * NETCONF transport mechanisms. The {@link NetconfSession} constructor takes a
  * transport mechanism to be responsible for the actual sending and receiving
- * of NETCONF protocol messages over the wire. {@link SSHSession} and
- * {@link TCPSession} implements the Transport interface.
+ * of NETCONF protocol messages over the wire. {@link SSHSession} implements
+ * the Transport interface.
  * 
  * @see SSHSession
- * @see TCPSession
- * 
  */
-public interface Transport
-{
+public interface Transport extends InTransport, OutTransport {
     /**
-     * Reads "one" reply from the transport input stream.
+     * Closes the Transport session/connection.
      */
-    String readOne(long timeout, TimeUnit timeUnit) throws IOException;
+    void close();
 }

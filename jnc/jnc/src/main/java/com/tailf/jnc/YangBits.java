@@ -177,7 +177,7 @@ public class YangBits extends YangBaseInt<BigInteger> {
     }
 
     /**
-     * Performs arithmetic or assignment: this.value &= v.value.
+     * Performs arithmetic or assignment: {@code this.value &= v.value}.
      * 
      * @param v YangBits instance to fetch value from.
      */

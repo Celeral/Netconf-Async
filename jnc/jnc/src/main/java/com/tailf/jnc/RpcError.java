@@ -105,7 +105,7 @@ public class RpcError {
     /**
      * Constructor, initialized with an rpc-error element tree.
      * 
-     * @param The rpc-error element tree to initialize with.
+     * @param data The rpc-error element tree to initialize with.
      */
     public RpcError(Element data) {
         // parse out the fields in data

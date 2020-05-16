@@ -1,9 +1,7 @@
 package com.tailf.jnc;
 
 import java.io.IOException;
-import java.io.PrintStream;
 import java.util.ArrayList;
-import java.util.concurrent.TimeUnit;
 
 /**
  * A NETCONF session class. It makes it possible to connect to a NETCONF agent
@@ -72,9 +70,9 @@ import java.util.concurrent.TimeUnit;
  * </pre>
  * <p>
  * Example 3: Transaction using candidates
- * <p>
+ * </p>
  * 
- * <pre>
+ * <pre>{@code
  * try {
  *     // Start (NETCONF) sessions towards devices
  *     SSHConnection c1 = new SSHConnection(&quot;127.0.0.1&quot;, 3456);
@@ -120,7 +118,7 @@ import java.util.concurrent.TimeUnit;
  *     // Devices will rollback within 1 min
  * 
  * }
- * </pre>
+ * }</pre>
  * 
  * @see Element
  * 
@@ -170,8 +168,6 @@ public class NetconfSession {
      * <code>hello</code> message upon connect.
      */
     protected Capabilities capabilities;
-    private long timeout = 10;
-    private TimeUnit timeUnit = TimeUnit.MINUTES;
 
     /**
      * Return a Capabilities object with the NETCONF capabilities for this
@@ -199,32 +195,98 @@ public class NetconfSession {
     /**
      * The outgoing transport for this Session
      */
-    protected PrintStream out;
+    protected OutTransport out;
 
     /**
      * The incoming transport for this Session
      */
-    protected Transport in;
+    protected InTransport in;
 
-    /**
+
+   /**
      * Creates a new session object using the given transport object. This will
      * initialize the transport and send out an initial hello message to the
      * server.
-     * 
+     *
      * @see SSHSession
-     * 
+     *
      * @param transport Transport object
      */
 
-    public NetconfSession(Transport transport, PrintStream out) throws JNCException,
-                                                                       IOException
-    {
-        this();
-        this.out = out;
+    public NetconfSession(Transport transport) throws JNCException,
+            IOException {
+        out = transport;
         in = transport; // same
+        parser = new XMLParser();
+        hello();
+    }
+
+   /**
+     * Creates a new session object using the given transport object. This will
+     * initialize the transport and send out an initial hello message to the
+     * server.
+     *
+     * @see SSHSession
+     *
+     * @param transport Transport object
+     * @param parser XML parser object
+     *
+     *            If we are using the confm package to create and manipulate
+     *            objects we must instantiate the parser as an
+     *            com.tailf.confm.XMLParser() If we fail to do that, we get the
+     *            XMLParser class from the inm package which always only
+     *            returns Element objects as opposed to the XMLParser from the
+     *            confm package which can return objects matching the confm
+     *            generated classes. If we use the confm Device class to create
+     *            our netconf sessions, this is all done automatically, whereas
+     *            if we create our netconf sessions ourselves, _and_ also want
+     *            to retrieve real confm objects we must:
+     *
+     *            <pre>
+     * SSHConnection ssh = new SSHConnection(&quot;127.0.0.1&quot;, 2022);
+     * ssh.authenticateWithPassword(&quot;admin&quot;, &quot;admin&quot;);
+     * Transport tr = new SSHSession(ssh);
+     * NetconfSession sess = new NetconfSession(tr, new com.tailf.confm.XMLParser());
+     * </pre>
+     **/
+
+    public NetconfSession(Transport transport, XMLParser parser)
+            throws JNCException, IOException {
+        out = transport;
+        in = transport; // same
+        this.parser = parser;
+        hello();
     }
 
     /**
+     * Sets the transport used by this session.
+     *
+     * @param transport Transport object, for example {@link SSHSession}
+     */
+    public void setTransport(Transport transport) {
+        out = transport;
+        in = transport; // same
+    }
+
+    protected void setOutTransport(OutTransport out)
+    {
+      this.out = out;
+    }
+    
+    /**
+     * Returns the transport object used by this session.
+     *
+     * @see SSHSession
+     */
+    public Transport getTransport() {
+      if (in == out) {
+        return (Transport)in;
+      }
+
+      throw new UnsupportedOperationException("Asymmetric transport detected, cannot be exposed outside!");
+    }
+
+   /**
      * Creates a new session object. The session need to be given a transport
      * object with {@link #setTransport(Transport)} and an initial hello needs
      * to be sent to advertise capabilities.
@@ -233,31 +295,6 @@ public class NetconfSession {
         parser = new XMLParser();
     }
 
-    /**
-     * Sets the transport used by this session.
-     * 
-     * @param transport Transport object, for example {@link SSHSession}
-     */
-    public void setTransport(Transport transport, PrintStream out)
-    {
-        this.out = out;
-        in = transport; // same
-    }
-
-    /**
-     * Returns the transport object used by this session.
-     * 
-     * @see SSHSession
-     */
-    public Transport getTransport() {
-        return in;
-    }
-
-    public void setTimeout(long timeout, TimeUnit timeUnit)
-    {
-        this.timeout = timeout;
-        this.timeUnit = timeUnit;
-    }
     /**
      * Capabilities are advertised in messages sent by each peer during session
      * establishment. When the NETCONF session is opened, each peer (both
@@ -274,7 +311,7 @@ public class NetconfSession {
         trace("hello: ");
         encode_hello(out);
         out.flush();
-        final String reply = in.readOne(timeout, timeUnit);
+        final String reply = in.readOne().toString();
         establish_capabilities(reply);
     }
 
@@ -293,7 +330,7 @@ public class NetconfSession {
      */
     public Element rpc(String request) throws IOException, JNCException {
         sendRequest(request);
-        final String reply = in.readOne(timeout, timeUnit);
+        final String reply = in.readOne().toString();
         return parser.parse(reply);
     }
 
@@ -312,8 +349,8 @@ public class NetconfSession {
      */
     public Element rpc(Element request) throws IOException, JNCException {
         sendRequest(request);
-        final String reply = in.readOne(timeout, timeUnit);
-        return parser.parse(reply);
+        final StringBuffer reply = in.readOne();
+        return parser.parse(reply.toString());
     }
 
     /**
@@ -361,7 +398,7 @@ public class NetconfSession {
      * @see #sendRequest(Element)
      */
     public Element readReply() throws IOException, JNCException {
-        final String reply = in.readOne(timeout, timeUnit);
+        final String reply = in.readOne().toString();
         return parser.parse(reply);
     }
 
@@ -885,7 +922,6 @@ public class NetconfSession {
      * An attempt to lock the configuration must fail if an existing session or
      * other entity holds a lock on any portion of the lock target.
      * 
-     * @param datastore datastore of which a part will be locked
      * @param select An array of selection filters
      * @return A unique lock reference which should be used to unlockPartial()
      */
@@ -896,10 +932,10 @@ public class NetconfSession {
     }
 
     /**
-     * Same as {@link #lockPartial(int,String[])} except it only takes one
+     * Same as {@link #lockPartial(String[])} except it only takes one
      * selection as argument.
      * 
-     * @see #lockPartial(int,String[])
+     * @see #lockPartial(String[])
      */
     public int lockPartial(String select) throws JNCException, IOException {
         return lockPartial(new String[] { select });
@@ -910,7 +946,7 @@ public class NetconfSession {
      * obtained with the {@link #lock} operation.
      * 
      * @param lockId Previously received lock identifier from
-     *            {@link #lockPartial(int,String[])}
+     *            {@link #lockPartial(String[])}
      */
     public void unlockPartial(int lockId) throws JNCException, IOException {
         int mid = unlock_partial_request(lockId);
@@ -1178,7 +1214,7 @@ public class NetconfSession {
      */
 
     public Element receiveNotification() throws IOException, JNCException {
-        final String notification = in.readOne(timeout, timeUnit);
+        final String notification = in.readOne().toString();
         Element t = receive_notification_parse(notification);
         return receive_notification_post_process(t);
     }
@@ -1219,7 +1255,7 @@ public class NetconfSession {
      * @throws IOException
      */
     protected Element recv_rpc_reply_ok(String mid) throws JNCException, IOException {
-        final String reply = in.readOne(timeout, timeUnit);
+        final String reply = in.readOne().toString();
         trace("reply= " + reply);
         return recv_rpc_reply_ok(reply, mid);
     }
@@ -1249,9 +1285,8 @@ public class NetconfSession {
 
     NodeSet recv_rpc_reply(String path, XMLParser parser, String mid)
             throws JNCException, IOException {
-        final String reply = in.readOne(timeout, timeUnit);
+        final String reply = in.readOne().toString();
         trace("reply= " + reply);
-
         return parse_rpc_reply(parser, reply, mid, path);
     }
 
@@ -1291,7 +1326,7 @@ public class NetconfSession {
      * Encodes the hello message. The capabilities advertised from the client
      * side are the base NETCONF capability.
      */
-    protected void encode_hello(PrintStream out)
+    protected void encode_hello(OutTransport out)
     {
         out.print("<hello xmlns=\"" + Capabilities.NS_NETCONF + "\">");
         out.print("<capabilities>");
@@ -1317,7 +1352,7 @@ public class NetconfSession {
      * 
      * @param out Transport output stream
      */
-    protected int encode_rpc_begin(PrintStream out)
+    protected int encode_rpc_begin(OutTransport out)
     {
         return encode_rpc_begin(out, null);
     }
@@ -1331,7 +1366,7 @@ public class NetconfSession {
      * @param out Transport output stream
      * @param attr Extra attribute to be added to rpc header
      */
-    protected int encode_rpc_begin(PrintStream out, Attribute attr)
+    protected int encode_rpc_begin(OutTransport out, Attribute attr)
     {
         final String prefix = Element.defaultPrefixes
                 .nsToPrefix(Element.NETCONF_NAMESPACE);
@@ -1364,7 +1399,7 @@ public class NetconfSession {
      * 
      * @param out Transport output stream
      */
-    protected void encode_rpc_end(PrintStream out)
+    protected void encode_rpc_end(OutTransport out)
     {
         out.print("</" + nc + "rpc>");
         // do not end with newline
@@ -1387,7 +1422,7 @@ public class NetconfSession {
      * &lt;/rpc&gt;
      * </pre>
      */
-    int encode_getConfig(PrintStream out, String source, Element subtreeFilter)
+    int encode_getConfig(OutTransport out, String source, Element subtreeFilter)
             throws JNCException {
         final int mid = encode_rpc_begin(out, withDefaultsAttr);
         out.println("<" + nc + GET_CONFIG_GT);
@@ -1416,7 +1451,7 @@ public class NetconfSession {
      * &lt;/rpc&gt;
      * </pre>
      */
-    int encode_rpc(PrintStream out, Element data) throws JNCException
+    int encode_rpc(OutTransport out, Element data) throws JNCException
     {
         final int mid = encode_rpc_begin(out);
         data.encode(out);
@@ -1437,7 +1472,7 @@ public class NetconfSession {
      * &lt;/rpc&gt;
      * </pre>
      */
-    int encode_getConfig(PrintStream out, String source, String xpath)
+    int encode_getConfig(OutTransport out, String source, String xpath)
     {
         final int mid = encode_rpc_begin(out, withDefaultsAttr);
         out.println("<" + nc + GET_CONFIG_GT);
@@ -1467,7 +1502,7 @@ public class NetconfSession {
      * &lt;/rpc&gt;
      * </pre>
      */
-    int encode_getConfig(PrintStream out, String source)
+    int encode_getConfig(OutTransport out, String source)
     {
         final int mid = encode_rpc_begin(out, withDefaultsAttr);
         out.println("<" + nc + GET_CONFIG_GT);
@@ -1562,7 +1597,7 @@ public class NetconfSession {
      * &lt;/rpc&gt;
      * </pre>
      */
-    int encode_get(PrintStream out, Element subtreeFilter) throws JNCException
+    int encode_get(OutTransport out, Element subtreeFilter) throws JNCException
     {
         final int mid = encode_rpc_begin(out, withDefaultsAttr);
         out.println("<" + nc + GET_GT);
@@ -1586,7 +1621,7 @@ public class NetconfSession {
      * &lt;/rpc&gt;
      * </pre>
      */
-    protected int encode_get(PrintStream out, String xpath)
+    protected int encode_get(OutTransport out, String xpath)
     {
         final int mid = encode_rpc_begin(out, withDefaultsAttr);
         out.println("<" + nc + GET_GT);
@@ -1621,12 +1656,12 @@ public class NetconfSession {
      * &lt;/rpc&gt;
      * </pre>
      */
-    int encode_editConfig(PrintStream out, String target, Element configTree)
+    int encode_editConfig(OutTransport out, String target, Element configTree)
             throws JNCException {
         return encode_editConfig(out, target, new NodeSet(configTree));
     }
 
-    int encode_editConfig(PrintStream out, String target, NodeSet configTrees)
+    int encode_editConfig(OutTransport out, String target, NodeSet configTrees)
             throws JNCException {
 
         final int mid = encode_rpc_begin(out);
@@ -1658,7 +1693,7 @@ public class NetconfSession {
      * &lt;/rpc&gt;
      * </pre>
      */
-    int encode_editConfig(PrintStream out, String target, String url)
+    int encode_editConfig(OutTransport out, String target, String url)
             throws JNCException {
         final int mid = encode_rpc_begin(out);
         out.println("<" + nc + EDIT_CONFIG_GT);
@@ -1677,7 +1712,7 @@ public class NetconfSession {
     /**
      * Encode default-operation for editConfig.
      */
-    void encode_defaultOperation(PrintStream out) throws JNCException
+    void encode_defaultOperation(OutTransport out) throws JNCException
     {
         switch (defaultOperation) {
         case NOT_SET:
@@ -1703,7 +1738,7 @@ public class NetconfSession {
     /**
      * Encode test-option for editConfig
      */
-    void encode_testOption(PrintStream out) throws JNCException
+    void encode_testOption(OutTransport out) throws JNCException
     {
         switch (testOption) {
         case NOT_SET:
@@ -1743,7 +1778,7 @@ public class NetconfSession {
     /**
      * Encode error-option for editConfig
      */
-    void encode_errorOption(PrintStream out) throws JNCException
+    void encode_errorOption(OutTransport out) throws JNCException
     {
         switch (errorOption) {
         case NOT_SET:
@@ -1792,7 +1827,7 @@ public class NetconfSession {
      * &lt;/rpc&gt;
      * </pre>
      */
-    int encode_copyConfig(PrintStream out, Element sourceTree, String target)
+    int encode_copyConfig(OutTransport out, Element sourceTree, String target)
             throws JNCException {
         return encode_copyConfig(out, new NodeSet(sourceTree), target);
     }
@@ -1802,7 +1837,7 @@ public class NetconfSession {
      * the copyConfig oeration
      */
 
-    int encode_copyConfig(PrintStream out, NodeSet sourceTrees, String target)
+    int encode_copyConfig(OutTransport out, NodeSet sourceTrees, String target)
             throws JNCException {
         final int mid = encode_rpc_begin(out);
         out.println("<" + nc + COPY_CONFIG_GT);
@@ -1840,7 +1875,7 @@ public class NetconfSession {
      * &lt;/rpc&gt;
      * </pre>
      */
-    int encode_copyConfig(PrintStream out, String source, String target)
+    int encode_copyConfig(OutTransport out, String source, String target)
             throws JNCException {
         final int mid = encode_rpc_begin(out, withDefaultsAttr);
         out.println("<" + nc + COPY_CONFIG_GT);
@@ -1869,7 +1904,7 @@ public class NetconfSession {
      * &lt;/rpc&gt;
      * </pre>
      */
-    int encode_deleteConfig(PrintStream out, String target)
+    int encode_deleteConfig(OutTransport out, String target)
     {
         final int mid = encode_rpc_begin(out);
         out.println("<" + nc + "delete-config>");
@@ -1893,7 +1928,7 @@ public class NetconfSession {
      * &lt;/rpc&gt;
      * </pre>
      */
-    int encode_lock(PrintStream out, String target)
+    int encode_lock(OutTransport out, String target)
     {
         final int mid = encode_rpc_begin(out);
         out.println("<" + nc + "lock>");
@@ -1917,7 +1952,7 @@ public class NetconfSession {
      * &lt;/rpc&gt;
      * </pre>
      */
-    int encode_unlock(PrintStream out, String target)
+    int encode_unlock(OutTransport out, String target)
     {
         final int mid = encode_rpc_begin(out);
         out.println("<" + nc + "unlock>");
@@ -1949,7 +1984,7 @@ public class NetconfSession {
      * &lt;/rpc&gt;
      * </pre>
      */
-    int encode_lockPartial(PrintStream out, String[] select)
+    int encode_lockPartial(OutTransport out, String[] select)
     {
 
         final String prefix = Element.defaultPrefixes
@@ -1981,7 +2016,7 @@ public class NetconfSession {
      * &lt;/partial-unlock&gt;
      * </pre>
      */
-    int encode_unlockPartial(PrintStream out, int lockId)
+    int encode_unlockPartial(OutTransport out, int lockId)
     {
 
         final String prefix = Element.defaultPrefixes
@@ -2010,7 +2045,7 @@ public class NetconfSession {
      * &lt;/rpc&gt;
      * </pre>
      */
-    int encode_commit(PrintStream out)
+    int encode_commit(OutTransport out)
     {
         final int mid = encode_rpc_begin(out);
         out.println("<" + nc + "commit/>");
@@ -2031,7 +2066,7 @@ public class NetconfSession {
      * &lt;/rpc&gt;
      * </pre>
      */
-    int encode_confirmedCommit(PrintStream out, int timeout)
+    int encode_confirmedCommit(OutTransport out, int timeout)
     {
         final int mid = encode_rpc_begin(out);
         out.println("<" + nc + "commit>");
@@ -2054,7 +2089,7 @@ public class NetconfSession {
      * &lt;/rpc&gt;
      * </pre>
      */
-    int encode_discardChanges(PrintStream out)
+    int encode_discardChanges(OutTransport out)
     {
         final int mid = encode_rpc_begin(out);
         out.println("<" + nc + "discard-changes/>");
@@ -2072,7 +2107,7 @@ public class NetconfSession {
      * &lt;/rpc&gt;
      * </pre>
      */
-    protected int encode_closeSession(PrintStream out)
+    protected int encode_closeSession(OutTransport out)
     {
         final int mid = encode_rpc_begin(out);
         out.println("<" + nc + "close-session/>");
@@ -2092,7 +2127,7 @@ public class NetconfSession {
      * &lt;/rpc&gt;
      * </pre>
      */
-    protected int encode_killSession(PrintStream out, long sessionId)
+    protected int encode_killSession(OutTransport out, long sessionId)
     {
         final int mid = encode_rpc_begin(out);
         out.println("<" + nc + "kill-session>");
@@ -2125,7 +2160,7 @@ public class NetconfSession {
      * &lt;/rpc&gt;
      * </pre>
      */
-    int encode_validate(PrintStream out, Element configTree)
+    int encode_validate(OutTransport out, Element configTree)
             throws JNCException {
         final int mid = encode_rpc_begin(out);
         out.println("<" + nc + VALIDATE_GT);
@@ -2151,7 +2186,7 @@ public class NetconfSession {
      * &lt;/rpc&gt;
      * </pre>
      */
-    int encode_validate(PrintStream out, String source)
+    int encode_validate(OutTransport out, String source)
     {
         final int mid = encode_rpc_begin(out);
         out.println("<" + nc + VALIDATE_GT);
@@ -2175,7 +2210,7 @@ public class NetconfSession {
      * &lt;/rpc&gt;
      * </pre>
      */
-    int encode_createSubscription(PrintStream out, String stream,
+    int encode_createSubscription(OutTransport out, String stream,
                                   String filter, String startTime, String stopTime) {
         final String prefix = Element.defaultPrefixes
                 .nsToPrefix(Capabilities.NS_NOTIFICATION);
@@ -2222,7 +2257,7 @@ public class NetconfSession {
      * &lt;/rpc&gt;
      * </pre>
      */
-    int encode_createSubscription(PrintStream out, String stream,
+    int encode_createSubscription(OutTransport out, String stream,
                                   NodeSet eventFilter, String startTime, String stopTime)
             throws JNCException {
         final String prefix = Element.defaultPrefixes
@@ -2283,7 +2318,7 @@ public class NetconfSession {
      * @param data Element tree representing the action
      * @throws JNCException if unable to encode data
      */
-    protected int encode_action(PrintStream out, Element data) throws JNCException
+    protected int encode_action(OutTransport out, Element data) throws JNCException
     {
         final String prefix = Element.defaultPrefixes.nsToPrefix(Capabilities.NS_ACTIONS);
         final String act = mk_prefix_colon(prefix);

@@ -1,6 +1,5 @@
 package com.tailf.jnc;
 
-import java.io.PrintStream;
 import java.util.ArrayList;
 
 /**
@@ -149,7 +148,7 @@ public class NodeSet extends ArrayList<Element> {
      *             Element.encode} implementation fails, for example due to
      *             missing capability.
      */
-    void encode(PrintStream out, Capabilities c) throws JNCException
+    void encode(OutTransport out, Capabilities c) throws JNCException
     {
         for (final Element elem : this) {
             elem.encode(out, true, c);

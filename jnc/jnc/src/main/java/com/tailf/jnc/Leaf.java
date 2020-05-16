@@ -1,7 +1,5 @@
 package com.tailf.jnc;
 
-import java.io.PrintStream;
-
 /**
  * This class represents leaves in data model aware Element trees.
  * <p>
@@ -23,7 +21,7 @@ public class Leaf extends Element {
     private SchemaNode n = null;
 
     @Override
-    protected void encode(PrintStream out, boolean newline_at_end,
+    protected void encode(OutTransport out, boolean newline_at_end,
                           Capabilities capas) throws JNCException {
         if (RevisionInfo.olderRevisionSupportEnabled && capas != null) {
             if (tp == null) {

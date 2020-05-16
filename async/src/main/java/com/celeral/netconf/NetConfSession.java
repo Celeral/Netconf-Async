@@ -17,6 +17,7 @@ package com.celeral.netconf;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.io.PrintStream;
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
@@ -34,10 +35,11 @@ import java.util.function.Function;
 
 import com.tailf.jnc.Capabilities;
 import com.tailf.jnc.Element;
+import com.tailf.jnc.InTransport;
 import com.tailf.jnc.JNCException;
 import com.tailf.jnc.NetconfSession;
 import com.tailf.jnc.NodeSet;
-import com.tailf.jnc.Transport;
+import com.tailf.jnc.OutTransport;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -67,16 +69,17 @@ public class NetConfSession extends NetconfSession {
   private final ByteArrayOutputStream outputStream;
   private MessageCodec<ByteBuffer> codec;
 
-  /**
-   * Creates a new session object using the given transport object. This will initialize the
-   * transport and send out an initial hello message to the server.
-   *
-   * @see SSHSession
-   * @param transport Transport object
-   */
-  private static class NetConfTransport implements Transport {
+  private static class NetConfTransport implements InTransport {
     final AtomicBoolean initialized = new AtomicBoolean();
     NetConfSession session;
+
+    long timeout = 10;
+    TimeUnit timeUnit = TimeUnit.MINUTES;
+
+    public void setTimeout(long timeout, TimeUnit timeUnit) {
+      this.timeout = timeout;
+      this.timeUnit = timeUnit;
+    }
 
     private void setNetConfSession(NetConfSession session) {
       if (initialized.get()) {
@@ -95,7 +98,7 @@ public class NetConfSession extends NetconfSession {
     }
 
     @Override
-    public String readOne(long timeout, TimeUnit timeUnit) throws IOException {
+    public StringBuffer readOne() throws IOException {
       if (initialized.get() == false) {
         long start = System.nanoTime();
         try {
@@ -123,7 +126,7 @@ public class NetConfSession extends NetconfSession {
 
       long start = System.nanoTime();
       try {
-        return session.response(timeout, timeUnit).get();
+        return new StringBuffer(session.response(timeout, timeUnit).get());
       } catch (InterruptedException ex) {
         throw Throwables.throwFormatted(
             msg -> new IOException(msg, ex),
@@ -147,35 +150,59 @@ public class NetConfSession extends NetconfSession {
             timeUnit);
       }
     }
+
+    @Override
+    public boolean ready() throws IOException {
+      throw new UnsupportedOperationException(
+          "Not supported yet."); // To change body of generated methods, choose Tools | Templates.
+    }
   }
 
-  public NetConfSession(ByteBufferChannel channel, Charset charset)
-      throws JNCException, IOException {
+  /**
+   * Creates a new session object using the given ByteBuffer channel object. It initializes the
+   * session with the ForkPool.commonPool() executor service. It uses Unlike the JNC's
+   * NetConfSession constructor, this constructor does not invoke hello with the server
+   * automatically.So one would need to make a call to it before initiating any rpc.
+   *
+   * @param channel ByteBuffer channel ready to communicate with remote server
+   * @param charset Charset for converting the RPC request and response from String object
+   * @throws com.tailf.jnc.JNCException passes the JNCException thrown by super class as it is
+   */
+  public NetConfSession(ByteBufferChannel channel, Charset charset) throws JNCException {
     this(channel, charset, ForkJoinPool.commonPool());
-  }
-
-  public NetConfSession(ByteBufferChannel channel, Charset charset, ExecutorService executorService)
-      throws JNCException, IOException {
-    this(new ByteArrayOutputStream(4096), channel, charset, executorService);
-    initializeTransport();
   }
 
   private void initializeTransport() {
     ((NetConfTransport) super.in).setNetConfSession(this);
   }
 
-  private NetConfSession(
-      ByteArrayOutputStream stream,
-      ByteBufferChannel channel,
-      Charset charset,
-      ExecutorService executorService)
-      throws JNCException, IOException {
-    super(new NetConfTransport(), new PrintStream(stream, false, charset));
+  private static class PrintStreamOutTransport extends PrintStream implements OutTransport {
+    PrintStreamOutTransport(OutputStream stream, Charset charset) {
+      super(stream, false, charset);
+    }
+  }
+
+  /**
+   * Creates a new session object using the given ByteBuffer channel object.It initializes the
+   * session with the ForkPool.commonPool() executor service. It uses Unlike the JNC's
+   * NetConfSession constructor, this constructor does not invoke hello with the server
+   * automatically.So one would need to make a call to it before initiating any rpc.
+   *
+   * @param channel ByteBuffer channel ready to communicate with remote server
+   * @param charset Charset for converting the RPC request and response from String object
+   * @param executorService executor service for async operations
+   * @throws com.tailf.jnc.JNCException passes the exception thrown by super class as it is
+   */
+  public NetConfSession(ByteBufferChannel channel, Charset charset, ExecutorService executorService)
+      throws JNCException {
+    super();
     this.executorService =
         Objects.requireNonNull(executorService, "executorService argument must be non-null!");
     this.charset = charset;
     this.channel = channel;
-    this.outputStream = stream;
+
+    this.outputStream = new ByteArrayOutputStream(4096);
+    super.setOutTransport(new PrintStreamOutTransport(this.outputStream, charset));
 
     this.codec = new DefaultMessageCodec(charset);
 

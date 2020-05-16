@@ -4,13 +4,12 @@
   <parent>
     <groupId>com.celeral</groupId>
     <artifactId>netconf</artifactId>
-    <version>1.0.0</version>
+    <version>${revision}</version>
     <relativePath>../..</relativePath>
   </parent>
 
-  <groupId>com.tailf</groupId>
+  <groupId>com.celeral</groupId>
   <artifactId>jnc</artifactId>
-  <version>2.0.0</version>
   <packaging>jar</packaging>
 
   <name>JNC</name>
@@ -18,9 +17,8 @@
   <url>https://github.com/tail-f-systems/JNC</url>
 
   <properties>
-    <maven.deploy.skip>true</maven.deploy.skip>
-    <maven.javadoc.skip>true</maven.javadoc.skip>
-    <skipNexusStagingDeployMojo>true</skipNexusStagingDeployMojo>
+    <japicmp.skip>true</japicmp.skip>
+    <skipNexusStagingDeployMojo>false</skipNexusStagingDeployMojo>
   </properties>
 
   <licenses>
@@ -36,6 +34,10 @@
       <organization>Tail-f Systems</organization>
       <organizationUrl>http://www.tail-f.com/</organizationUrl>
     </developer>
+    <developer>
+      <organization>Celeral</organization>
+      <organizationUrl>https://github.com/Celeral</organizationUrl>
+    </developer>
   </developers>
 
   <scm>
@@ -43,6 +45,53 @@
     <developerConnection>scm:git:git@github.com:tail-f-systems/JNC.git</developerConnection>
     <url>git@github.com:tail-f-systems/JNC.git</url>
   </scm>
+
+
+<!--  <profiles>
+    <profile>
+      <id>release</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>com.github.siom79.japicmp</groupId>
+            <artifactId>japicmp-maven-plugin</artifactId>
+            <version>0.14.3</version>
+            <configuration>
+              <oldVersion>
+                <dependency>
+                  <groupId>com.tailf</groupId>
+                  <artifactId>jnc</artifactId>
+                  <version>1.0</version>
+                </dependency>
+              </oldVersion>
+              <newVersion>
+                <file>
+                  <path>${project.build.directory}/${project.artifactId}-${project.version}.jar</path>
+                </file>
+              </newVersion>
+              <parameter>
+                <onlyModified>true</onlyModified>
+                <accessModifier>protected</accessModifier>
+                <breakBuildBasedOnSemanticVersioning>true</breakBuildBasedOnSemanticVersioning>
+                <onlyBinaryIncompatible>false</onlyBinaryIncompatible>
+                <includeSynthetic>false</includeSynthetic>
+                <ignoreMissingClasses>false</ignoreMissingClasses>
+              </parameter>
+            </configuration>
+            <executions>
+              <execution>
+                <phase>verify</phase>
+                <goals>
+                  <goal>cmp</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+
+      </build>
+    </profile>
+  </profiles>-->
 
   <build>
     <!-- Specify maven non-standard source folder -->
@@ -62,9 +111,13 @@
     <dependency>
       <groupId>junit</groupId>
       <artifactId>junit</artifactId>
-      <version>4.12</version>
       <scope>test</scope>
       <type>jar</type>
+    </dependency>
+    <dependency>
+      <groupId>ch.ethz.ganymed</groupId>
+      <artifactId>ganymed-ssh2</artifactId>
+      <version>262</version>
     </dependency>
   </dependencies>
 </project>

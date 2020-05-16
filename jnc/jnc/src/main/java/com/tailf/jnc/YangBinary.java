@@ -113,7 +113,7 @@ public class YangBinary extends YangBaseType<String> {
      * Checks that the value buffer of this object has the specified number of
      * octets/bytes.
      * 
-     * @param len The number of octets/bytes to check for.
+     * @param numberOfBytes The number of octets/bytes to check for.
      * @throws YangException If value buffer does not have len number of
      *             octets/bytes.
      */
@@ -125,7 +125,7 @@ public class YangBinary extends YangBaseType<String> {
      * Checks that the value buffer of this object has less than the specified
      * number of octets/bytes.
      * 
-     * @param len The number of octets/bytes to compare against.
+     * @param numberOfBytes The number of octets/bytes to compare against.
      * @throws YangException If value buffer does not have less than len number
      *             of octets/bytes.
      */
@@ -137,7 +137,7 @@ public class YangBinary extends YangBaseType<String> {
      * Checks that the value buffer of this object has more than the specified
      * number of octets/bytes.
      * 
-     * @param len The number of octets/bytes to compare against.
+     * @param numberOfBytes The number of octets/bytes to compare against.
      * @throws YangException If value buffer does not have more than len number
      *             of octets/bytes.
      */

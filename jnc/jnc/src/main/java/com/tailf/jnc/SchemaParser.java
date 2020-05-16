@@ -14,7 +14,7 @@ import org.xml.sax.helpers.XMLReaderFactory;
 
 /**
  * A simple SAX parser, for parsing schema files with the following syntax:
- * <pre>
+ * <pre>{@code
  * <schema>
  *   <node>
  *     <tagapth>string</tagpath>
@@ -35,7 +35,7 @@ import org.xml.sax.helpers.XMLReaderFactory;
  *     </rev>
  *   </node>
  * <schema>
- * </pre>
+ * }</pre>
  * into a hashtable with {@link SchemaNode} elements.
  */
 public class SchemaParser {

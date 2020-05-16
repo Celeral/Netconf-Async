@@ -510,9 +510,9 @@ public class Path {
                     return Integer.valueOf(s);
                 } catch (final NumberFormatException e1) {
                     try {
-                        return new Float(s);
+                        return Float.valueOf(s);
                     } catch (final NumberFormatException e2) {
-                        return new Float(Float.NaN);
+                        return Float.NaN;
                     }
                 }
             } else if (x instanceof NodeSet) {
@@ -538,9 +538,9 @@ public class Path {
         /** neg. Unary minus "-x" */
         private Number neg(Object x) throws JNCException {
             if (x instanceof Integer) {
-                return Integer.valueOf(-((Integer) x).intValue());
+                return -((Integer) x);
             } else if (x instanceof Float) {
-                return new Float(-((Float) x).floatValue());
+                return -((Float) x);
             }
             throw new JNCException(JNCException.PATH_ERROR,
                     "badarg to function neg(): " + x);
@@ -554,7 +554,7 @@ public class Path {
             }
             final Float xf = f_float(x);
             final Float yf = f_float(y);
-            return new Float(xf.floatValue() - yf.floatValue());
+            return xf - yf;
         }
 
         /** plus "x + y" */
@@ -565,7 +565,7 @@ public class Path {
             }
             final Float xf = f_float(x);
             final Float yf = f_float(y);
-            return new Float(xf.floatValue() + yf.floatValue());
+            return xf + yf;
         }
 
         /** the float() function. */
@@ -573,7 +573,7 @@ public class Path {
             if (x instanceof Float) {
                 return (Float) x;
             } else if (x instanceof Integer) {
-                return new Float(((Integer) x).floatValue());
+                return ((Integer) x).floatValue();
             } else if (x == null) {
                 return null;
             }
@@ -1235,7 +1235,7 @@ public class Path {
                         j++;
                     }
                     value = new String(buf, i, j - i);
-                    number = new Float(value);
+                    number = Float.valueOf(value);
                 } else {
                     value = new String(buf, i, j - i);
                     number = Integer.valueOf(value);
