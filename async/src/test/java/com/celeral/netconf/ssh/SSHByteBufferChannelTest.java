@@ -35,35 +35,14 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import com.celeral.netconf.NetConfSession;
-import com.celeral.netconf.transport.Credentials;
 
 @Ignore
 public class SSHByteBufferChannelTest {
 
   @Test
   public void testSomeMethod() throws Exception {
-    Credentials creds =
-        new Credentials() {
-          @Override
-          public KeyPair getKeyPair()
-              throws IOException, NoSuchAlgorithmException, InvalidKeySpecException,
-                  InvalidAlgorithmParameterException {
-            return null;
-          }
-
-          @Override
-          public String getPassword() {
-            return "admin";
-          }
-
-          @Override
-          public String getUserName() {
-            return "admin";
-          }
-        };
-
     try (SSHSessionFactory factory = new SSHSessionFactory();
-        SSHSession session = factory.getSession("localhost", 8830, creds)) {
+        SSHSession session = factory.getSession("localhost", 8830, "admin", "admin", null).join()) {
       try (SSHByteBufferChannel channel = session.getChannel(30, TimeUnit.SECONDS)) {
         NetConfSession netconf = new NetConfSession(channel, StandardCharsets.UTF_8);
 
