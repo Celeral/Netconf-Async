@@ -229,7 +229,7 @@ public class NetConfSession extends NetconfSession {
 
     @Override
     public void failed(Throwable exc) {
-      future.completeExceptionally(exc);
+      future.completeExceptionally(new CompletionException(exc));
     }
   }
 
@@ -350,7 +350,7 @@ public class NetConfSession extends NetconfSession {
         schedulable.schedule();
       }
     } catch (Throwable th) {
-      future.completeExceptionally(th);
+      future.completeExceptionally(new CompletionException(th));
     }
 
     return future;
