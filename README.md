@@ -40,7 +40,7 @@ To use the package, you need to use following Maven dependency:
 <properties>
   ...
   <!-- Use the latest version whenever possible. -->
-  <celeral.version.netconf>1.1.0</celeral.version.netconf>
+  <celeral.version.netconf>1.2.0</celeral.version.netconf>
   ...
 </properties>
 
@@ -252,4 +252,6 @@ And then from elsewhere in your code you could e.g. make a netconf get call agai
 
 Also note that almost for all the calls on the `NetConfSession` object, the return type is `CompletableFuture`; It's intentionally that way so that you could use all the APIs available for `CompletableFuture` introduced in Java 8 and enhanced in Java 9 while using this library.
 
-As a side note, the library used some features available only in Java 9, so I had to mandate use of Java 11 which is the next Long Term Support Java Release after Java 8.
+~~As a side note, the library used some features available only in Java 9, so I had to mandate use of Java 11 which is the next Long Term Support Java Release after Java 8.~~
+
+As of v1.2.0, netconf-async is java 8 compatible.
