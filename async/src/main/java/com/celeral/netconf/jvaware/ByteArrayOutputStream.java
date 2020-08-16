@@ -13,25 +13,19 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.celeral.netconf;
+package com.celeral.netconf.jvaware;
 
-import java.text.MessageFormat;
-import java.util.concurrent.TimeUnit;
+import java.io.UnsupportedEncodingException;
+import java.nio.charset.Charset;
 
-public class ResponseTimeoutException extends ResponsePhaseException {
-  private static final long serialVersionUID = 20200503045000L;
+import com.celeral.utils.Throwables;
 
-  private final long timeout;
-  private final TimeUnit timeUnit;
-
-  public ResponseTimeoutException(long timeout, TimeUnit timeUnit, Throwable cause) {
-    super(cause);
-    this.timeout = timeout;
-    this.timeUnit = timeUnit;
-  }
-
-  @Override
-  public String getMessage() {
-    return MessageFormat.format("Timedout after {0} {1}", timeout, timeUnit);
+public class ByteArrayOutputStream {
+  public static String toString(java.io.ByteArrayOutputStream stream, Charset charset) {
+    try {
+      return stream.toString(charset.name());
+    } catch (UnsupportedEncodingException e) {
+      throw Throwables.throwSneaky(e);
+    }
   }
 }

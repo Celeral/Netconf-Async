@@ -136,6 +136,11 @@ Then in your java code, you could use it as follows:
 
 Quite a few use cases require connecting to multiple devices but do not wish to wait for the operation to finish. A helper method to do a one of operations with a bunch of devices could look like follows:
 ```java
+import com.celeral.utils.Closeables;
+import com.celeral.utils.Throwables;
+
+...
+
   /**
    * Creates a netconf session with deviceIP:830 using the given credentials and once the capabilties
    * are exchanged successfully, use the function to derive a future using the session. Teardown the
@@ -199,11 +204,43 @@ Quite a few use cases require connecting to multiple devices but do not wish to 
   }
 ```
 
+Or for the purist in you, that would want to ensure that there are no blocking at all, you could use a little help from
+the async class from the same utils library from where you used Closeables above. The Async interface provides a very
+variations of the utility method which allows you to get try-with-resource like semantics easily so that you can write
+clean async code without leaking resources.
+
+
+```java
+import static com.celeral.utils.Async.applyWith;
+import static com.celeral.utils.Async.applyWithAsync;
+
+...
+
+  public static <T> CompletableFuture<T> invokeNetConfRPC(String deviceIP, String username, String password, KeyPair keypair,
+                                                          Function<NetConfSession, CompletableFuture<T>> function)
+  {
+    return applyWith(SSHSessionFactory::new,
+                factory -> applyWithAsync(() -> factory.getSession(deviceIP, 830, username, password, keypair),
+                                session -> applyWith(() -> session.getChannel(30, SECONDS),
+                                                channel -> {
+                                                  final NetConfSession client = new NetConfSession(channel, StandardCharsets.UTF_8);
+                                                  return applyWith(() -> client.hello(30, 30, SECONDS).join(),
+                                                              hello -> function.apply(client),
+                                                              hello -> hello.close());
+                                                },
+                                                channel -> channel.close()),
+                                session -> session.close()),
+                factory -> factory.close());
+  }
+
+```
+
 And then from elsewhere in your code you could e.g. make a netconf get call against multiple devices at once:
 ```java
   for (String deviceIP : devices) {
     CompletableFuture<NodeSet> result = invokeNetConfRPC(deviceIP, username, password, keypair,
                                                          client -> client.get("version", 30, 90, SECONDS),
+                                                         /* do not pass the following argument in the later flavor of invokeNetConfRPC */
                                                          th -> {
                                                            if (th != null) {
                                                              logger.warn("ignoring postresult for {}", deviceIP, th);

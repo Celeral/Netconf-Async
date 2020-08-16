@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,12 +15,7 @@
  */
 package com.celeral.netconf.ssh;
 
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.security.InvalidAlgorithmParameterException;
-import java.security.KeyPair;
-import java.security.NoSuchAlgorithmException;
-import java.security.spec.InvalidKeySpecException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -35,35 +30,14 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import com.celeral.netconf.NetConfSession;
-import com.celeral.netconf.transport.Credentials;
 
 @Ignore
 public class SSHByteBufferChannelTest {
 
   @Test
   public void testSomeMethod() throws Exception {
-    Credentials creds =
-        new Credentials() {
-          @Override
-          public KeyPair getKeyPair()
-              throws IOException, NoSuchAlgorithmException, InvalidKeySpecException,
-                  InvalidAlgorithmParameterException {
-            return null;
-          }
-
-          @Override
-          public String getPassword() {
-            return "admin";
-          }
-
-          @Override
-          public String getUserName() {
-            return "admin";
-          }
-        };
-
     try (SSHSessionFactory factory = new SSHSessionFactory();
-        SSHSession session = factory.getSession("localhost", 8830, creds)) {
+        SSHSession session = factory.getSession("localhost", 8830, "admin", "admin", null).join()) {
       try (SSHByteBufferChannel channel = session.getChannel(30, TimeUnit.SECONDS)) {
         NetConfSession netconf = new NetConfSession(channel, StandardCharsets.UTF_8);
 
