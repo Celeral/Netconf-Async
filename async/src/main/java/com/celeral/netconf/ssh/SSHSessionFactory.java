@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -22,8 +22,11 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.apache.sshd.client.SshClient;
 import org.apache.sshd.client.auth.password.PasswordIdentityProvider;
+import org.apache.sshd.client.future.AuthFuture;
 import org.apache.sshd.client.future.ConnectFuture;
 import org.apache.sshd.client.session.ClientSession;
 import org.apache.sshd.common.FactoryManager;
@@ -31,12 +34,8 @@ import org.apache.sshd.common.PropertyResolverUtils;
 import org.apache.sshd.common.keyprovider.KeyIdentityProvider;
 
 import com.celeral.utils.Closeables;
-import com.celeral.netconf.transport.Session;
-import com.celeral.netconf.transport.SessionFactory;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-import org.apache.sshd.client.future.AuthFuture;
+import com.celeral.netconf.transport.SessionFactory;
 
 public class SSHSessionFactory implements SessionFactory, AutoCloseable {
   public static final TimeUnit DEFAULT_TIMEUNIT = TimeUnit.SECONDS;
@@ -58,20 +57,17 @@ public class SSHSessionFactory implements SessionFactory, AutoCloseable {
     client.start();
   }
 
-
-  protected void completeExceptionally(CompletableFuture<?>  future, Throwable throwable)
-  {
-    future.completeExceptionally(throwable instanceof CompletionException ? throwable : new CompletionException(throwable));
+  protected void completeExceptionally(CompletableFuture<?> future, Throwable throwable) {
+    future.completeExceptionally(
+        throwable instanceof CompletionException ? throwable : new CompletionException(throwable));
   }
 
   @SuppressWarnings("UseSpecificCatch")
-  public <T> CompletableFuture<T> getFuture(Consumer<CompletableFuture<T>> consumer)
-  {
+  public <T> CompletableFuture<T> getFuture(Consumer<CompletableFuture<T>> consumer) {
     CompletableFuture<T> future = new CompletableFuture<>();
     try {
       consumer.accept(future);
-    }
-    catch (Throwable th) {
+    } catch (Throwable th) {
       completeExceptionally(future, th);
     }
 
@@ -79,56 +75,54 @@ public class SSHSessionFactory implements SessionFactory, AutoCloseable {
   }
 
   @Override
-  public CompletableFuture<Session> getSession(String host, int port,
-                                               String username, String password, KeyPair keypair) throws IOException {
-    return getFuture(future -> {
-      ConnectFuture connect;
-      try {
-        connect = client.connect(username, host, port);
-      }
-      catch (IOException ex) {
-        completeExceptionally(future, ex);
-        return;
-      }
-      
-      connect.addListener(connectFuture -> {
-        if (connect.isConnected()) {
-          ClientSession session = connect.getSession();
-          try (Closeables closeables = new Closeables(session)) {
-            session.setPasswordIdentityProvider(PasswordIdentityProvider.EMPTY_PASSWORDS_PROVIDER);
-            session.setKeyIdentityProvider(KeyIdentityProvider.EMPTY_KEYS_PROVIDER);
-            if (keypair == null) {
-              session.addPasswordIdentity(password);
-            }
-            else {
-              session.addPublicKeyIdentity(keypair);
-            }
+  public CompletableFuture<SSHSession> getSession(
+      String host, int port, String username, String password, KeyPair keypair) throws IOException {
+    return getFuture(
+        future -> {
+          ConnectFuture connect;
+          try {
+            connect = client.connect(username, host, port);
+          } catch (IOException ex) {
+            completeExceptionally(future, ex);
+            return;
+          }
 
-            try {
-              AuthFuture auth = session.auth();
-              auth.addListener(authFuture -> {
-                if (auth.isSuccess()) {
-                  future.complete(new SSHSession(session));
-                }
-                else {
-                  completeExceptionally(future, auth.getException());
+          connect.addListener(
+              connectFuture -> {
+                if (connect.isConnected()) {
+                  ClientSession session = connect.getSession();
+                  try (Closeables closeables = new Closeables(session)) {
+                    session.setPasswordIdentityProvider(
+                        PasswordIdentityProvider.EMPTY_PASSWORDS_PROVIDER);
+                    session.setKeyIdentityProvider(KeyIdentityProvider.EMPTY_KEYS_PROVIDER);
+                    if (keypair == null) {
+                      session.addPasswordIdentity(password);
+                    } else {
+                      session.addPublicKeyIdentity(keypair);
+                    }
+
+                    try {
+                      AuthFuture auth = session.auth();
+                      auth.addListener(
+                          authFuture -> {
+                            if (auth.isSuccess()) {
+                              future.complete(new SSHSession(session));
+                            } else {
+                              completeExceptionally(future, auth.getException());
+                            }
+                          });
+                    } catch (IOException ex) {
+                      completeExceptionally(future, ex);
+                    }
+
+                    closeables.protect();
+                  }
+                } else {
+                  completeExceptionally(future, connect.getException());
                 }
               });
-            }
-            catch (IOException ex) {
-              completeExceptionally(future, ex);
-            }
-
-            closeables.protect();
-          }
-        }
-        else {
-          completeExceptionally(future, connect.getException());
-        }
-      });
-    });
+        });
   }
-
 
   @Override
   public void close() {

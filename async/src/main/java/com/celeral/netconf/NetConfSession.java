@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,8 +17,6 @@ package com.celeral.netconf;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.OutputStream;
-import java.io.PrintStream;
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
 import java.util.LinkedList;
@@ -39,13 +37,14 @@ import com.tailf.jnc.InTransport;
 import com.tailf.jnc.JNCException;
 import com.tailf.jnc.NetconfSession;
 import com.tailf.jnc.NodeSet;
-import com.tailf.jnc.OutTransport;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import com.celeral.utils.Closeables;
 import com.celeral.utils.Throwables;
+
+import com.celeral.netconf.jvaware.PrintStream;
 
 public class NetConfSession extends NetconfSession {
   public static final String NETCONF_BASE_1_1_CAPABILITY =
@@ -176,12 +175,6 @@ public class NetConfSession extends NetconfSession {
     ((NetConfTransport) super.in).setNetConfSession(this);
   }
 
-  private static class PrintStreamOutTransport extends PrintStream implements OutTransport {
-    PrintStreamOutTransport(OutputStream stream, Charset charset) {
-      super(stream, false, charset);
-    }
-  }
-
   /**
    * Creates a new session object using the given ByteBuffer channel object.It initializes the
    * session with the ForkPool.commonPool() executor service. It uses Unlike the JNC's
@@ -202,7 +195,7 @@ public class NetConfSession extends NetconfSession {
     this.channel = channel;
 
     this.outputStream = new ByteArrayOutputStream(4096);
-    super.setOutTransport(new PrintStreamOutTransport(this.outputStream, charset));
+    super.setOutTransport(PrintStream.getOutTransport(this.outputStream, charset));
 
     this.codec = new DefaultMessageCodec(charset);
 
@@ -297,7 +290,7 @@ public class NetConfSession extends NetconfSession {
       }
 
       channel.write(this);
-      future.orTimeout(timeout, timeUnit);
+      com.celeral.netconf.jvaware.CompletableFuture.orTimeout(future, timeout, timeUnit);
     }
   }
 
@@ -315,7 +308,8 @@ public class NetConfSession extends NetconfSession {
 
       if (!responseBuffer.hasRemaining()) {
         responseBuffer =
-            ByteBuffer.allocate(responseBuffer.capacity() << 1).put(responseBuffer.flip());
+            ByteBuffer.allocate(responseBuffer.capacity() << 1)
+                .put((ByteBuffer) responseBuffer.flip());
       }
 
       return true;
@@ -336,7 +330,7 @@ public class NetConfSession extends NetconfSession {
     @Override
     public void schedule() {
       channel.read(this);
-      future.orTimeout(timeout, timeUnit);
+      com.celeral.netconf.jvaware.CompletableFuture.orTimeout(future, timeout, timeUnit);
     }
   }
 
@@ -437,7 +431,11 @@ public class NetConfSession extends NetconfSession {
     encode_hello(out);
     out.flush();
     try {
-      return rpc(outputStream.toString(charset), requestTimeout, responseTimeout, timeUnit)
+      return rpc(
+              com.celeral.netconf.jvaware.ByteArrayOutputStream.toString(outputStream, charset),
+              requestTimeout,
+              responseTimeout,
+              timeUnit)
           .thenApplyAsync(
               reply -> {
                 AutoCloseable closeSession =
@@ -479,7 +477,11 @@ public class NetConfSession extends NetconfSession {
       TimeUnit timeUnit) {
     try {
       int mid = supplier.get();
-      return rpc(outputStream.toString(charset), requestTimeout, responseTimeout, timeUnit)
+      return rpc(
+              com.celeral.netconf.jvaware.ByteArrayOutputStream.toString(outputStream, charset),
+              requestTimeout,
+              responseTimeout,
+              timeUnit)
           .thenApplyAsync(
               reply -> {
                 try {
@@ -490,7 +492,8 @@ public class NetConfSession extends NetconfSession {
               },
               executorService);
     } catch (Exception ex) {
-      return CompletableFuture.failedFuture(new RequestGenerationException(ex));
+      return com.celeral.netconf.jvaware.CompletableFuture.failedFuture(
+          new RequestGenerationException(ex));
     } finally {
       outputStream.reset();
     }

@@ -46,67 +46,6 @@
     <url>git@github.com:tail-f-systems/JNC.git</url>
   </scm>
 
-
-<!--  <profiles>
-    <profile>
-      <id>release</id>
-      <build>
-        <plugins>
-          <plugin>
-            <groupId>com.github.siom79.japicmp</groupId>
-            <artifactId>japicmp-maven-plugin</artifactId>
-            <version>0.14.3</version>
-            <configuration>
-              <oldVersion>
-                <dependency>
-                  <groupId>com.tailf</groupId>
-                  <artifactId>jnc</artifactId>
-                  <version>1.0</version>
-                </dependency>
-              </oldVersion>
-              <newVersion>
-                <file>
-                  <path>${project.build.directory}/${project.artifactId}-${project.version}.jar</path>
-                </file>
-              </newVersion>
-              <parameter>
-                <onlyModified>true</onlyModified>
-                <accessModifier>protected</accessModifier>
-                <breakBuildBasedOnSemanticVersioning>true</breakBuildBasedOnSemanticVersioning>
-                <onlyBinaryIncompatible>false</onlyBinaryIncompatible>
-                <includeSynthetic>false</includeSynthetic>
-                <ignoreMissingClasses>false</ignoreMissingClasses>
-              </parameter>
-            </configuration>
-            <executions>
-              <execution>
-                <phase>verify</phase>
-                <goals>
-                  <goal>cmp</goal>
-                </goals>
-              </execution>
-            </executions>
-          </plugin>
-        </plugins>
-
-      </build>
-    </profile>
-  </profiles>-->
-
-  <build>
-    <!-- Specify maven non-standard source folder -->
-    <plugins>
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-compiler-plugin</artifactId>
-        <version>3.8.1</version>
-        <configuration>
-          <source>1.8</source>
-          <target>1.8</target>
-        </configuration>
-      </plugin>
-    </plugins>
-  </build>
   <dependencies>
     <dependency>
       <groupId>junit</groupId>
