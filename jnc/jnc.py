@@ -340,10 +340,10 @@ com_tailf_jnc = {'Attribute', 'Capabilities', 'ConfDSession',
                  'PathCreate', 'Prefix', 'PrefixMap', 'RevisionInfo',
                  'RpcError', 'SchemaNode', 'SchemaParser', 'SchemaTree',
                  'SSHConnection', 'SSHSession', 'Tagpath', 'TCPConnection',
-                 'TCPSession', 'Transport', 'Utils', 'XMLParser',
+                 'TCPSession', 'Transport', 'TypedElementChildrenIterator', 'Utils', 'XMLParser',
                  'YangBaseInt', 'YangBaseString', 'YangBaseType', 'YangBinary',
                  'YangBits', 'YangBoolean', 'YangDecimal64', 'YangElement',
-                 'YangEmpty', 'YangEnumeration', 'YangException',
+                 'YangEmpty', 'YangInstanceIdentifier','YangEnumeration', 'YangException',
                  'YangIdentityref', 'YangInt16', 'YangInt32', 'YangInt64',
                  'YangInt8', 'YangLeafref', 'YangString', 'YangType',
                  'YangUInt16', 'YangUInt32', 'YangUInt64', 'YangUInt8',
@@ -1005,12 +1005,12 @@ class ClassGenerator(object):
         # Namespace and prefix
         ns_arg = search_one(self.stmt, 'namespace').arg
         prefix = search_one(self.stmt, 'prefix')
-        
+
         # Add root to class_hierarchy dict
         if self.rootpkg not in class_hierarchy:
             class_hierarchy[self.rootpkg] = set([])
         class_hierarchy[self.rootpkg].add(self.n)
-        
+
         # Add all classes that will be generated to class_hierarchy dict
         def record(stmt, package):
             for ch in search(stmt, yangelement_stmts):
@@ -1949,7 +1949,7 @@ class MethodGenerator(object):
                         imports.add('.'.join([self.pkg, import_]))
                     else:
                         imports.add(import_)
-                        
+
 
         for dependency in imports:
             if dependency.startswith(('java.math', 'java.util',
@@ -2250,14 +2250,15 @@ class MethodGenerator(object):
                                  ' "', self.stmt.arg, '".']))
         res.add_javadoc(''.join(['@return An iterator for the ',
                                  self.stmt.keyword, '.']))
-        return_stmt = ['return new Element']
         if self.is_leaflist:
+            return_stmt = ['return new Element']
             res.set_return_type('ElementLeafListValueIterator')
             return_stmt.append('LeafListValue')
+            return_stmt.extend(['Iterator(children, "', self.stmt.arg, '");'])
         else:  # List
-            res.set_return_type('ElementChildrenIterator')
-            return_stmt.append('Children')
-        return_stmt.extend(['Iterator(children, "', self.stmt.arg, '");'])
+            return_stmt = ['return new ']
+            res.set_return_type('TypedElementChildrenIterator<'+self.n+'>')
+            return_stmt.extend(['TypedElementChildrenIterator<'+self.n+'>(children, "', self.stmt.arg, '");'])
         res.add_line(''.join(return_stmt))
         return self.fix_imports(res)
 
@@ -2644,7 +2645,7 @@ class TypedefMethodGenerator(MethodGenerator):
                 constructor.add_line(''.join(smap))
                 constructor.add_line(''.join(imap))
                 constructor.add_line(');')
-            
+
             # Add call to check method if type has constraints
             if self.needs_check:
                 constructor.add_line('check();')
